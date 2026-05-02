@@ -53,6 +53,9 @@ final class Transcript
         $body = (string) wp_remote_retrieve_body($resp);
         if ($code !== 200) {
             error_log("[newss] supadata HTTP {$code}: " . substr($body, 0, 500));
+            if ($code === 429 || $code >= 500) {
+                throw new \RuntimeException("Supadata HTTP {$code} — retryable");
+            }
             return '';
         }
         $data = json_decode($body, true);
