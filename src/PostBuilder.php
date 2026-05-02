@@ -135,9 +135,9 @@ final class PostBuilder
         $publishedDe = $this->formatDateDe($published);
 
         return sprintf(
-            '<div class="newss-embed" style="margin-bottom:20px;position:relative;padding-bottom:56.25%%;height:0;overflow:hidden;">'
-            . '<iframe src="%s" style="position:absolute;top:0;left:0;width:100%%;height:100%%;" frameborder="0"'
-            . ' allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>'
+            '<div class="newss-embed" style="margin:0 0 20px 0;width:100%%;max-width:100%%;aspect-ratio:16/9;background:#000;">'
+            . '<iframe src="%s" style="width:100%%;height:100%%;border:0;display:block;"'
+            . ' allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen loading="lazy"></iframe>'
             . '</div>'
             . '<div class="newss-source" style="margin-bottom:20px;font-size:0.85em;color:#666;">'
             . '<p>Dieses Video wurde am %s von <a href="%s" target="_blank" rel="noopener noreferrer">%s</a> auf YouTube veröffentlicht. '
