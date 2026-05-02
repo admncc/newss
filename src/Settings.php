@@ -84,7 +84,7 @@ final class Settings
         }
         check_admin_referer('newss_run_now');
         RssPoller::pollAll();
-        wp_safe_redirect(add_query_arg(['ran' => '1'], menu_page_url(self::PAGE_SLUG, false)));
+        wp_safe_redirect(add_query_arg(['ran' => '1'], admin_url('admin.php?page=' . self::PAGE_SLUG)));
         exit;
     }
 
