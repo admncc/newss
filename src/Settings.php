@@ -46,6 +46,7 @@ final class Settings
             'newss_anthropic_temperature'  => [self::class, 'sanitizeTemperature'],
             'newss_system_prompt'          => [self::class, 'sanitizeMultiline'],
             'newss_user_prompt_template'   => [self::class, 'sanitizeMultiline'],
+            'newss_supadata_api_key'       => 'sanitize_text_field',
             'newss_ytdlp_path'             => 'sanitize_text_field',
             'newss_whisper_enabled'        => 'absint',
             'newss_whisper_api_key'        => 'sanitize_text_field',
@@ -105,6 +106,7 @@ final class Settings
         $temperature = (float)  get_option('newss_anthropic_temperature', 1.0);
         $systemPrompt= (string) get_option('newss_system_prompt', Anthropic::defaultSystemPrompt());
         $userTpl     = (string) get_option('newss_user_prompt_template', Anthropic::defaultUserTemplate());
+        $supadataKey = (string) get_option('newss_supadata_api_key', '');
         $ytdlp       = (string) get_option('newss_ytdlp_path', 'yt-dlp');
         $whEnabled   = (int)    get_option('newss_whisper_enabled', 0);
         $whKey       = (string) get_option('newss_whisper_api_key', '');
@@ -206,20 +208,37 @@ final class Settings
                     </tr>
                 </table>
 
-                <h2>Transkript</h2>
+                <h2>Transkript-Quelle</h2>
+                <p class="description" style="max-width:780px;margin-bottom:8px">
+                    Reihenfolge: zuerst <strong>Supadata</strong> (wenn Key gesetzt) → dann <strong>yt-dlp</strong> → dann <strong>Whisper</strong> (wenn aktiviert).
+                    Auf Cloud-Hostern (RunCloud, AWS, etc.) wird yt-dlp meist von YouTube als Bot blockiert — Supadata umgeht das.
+                </p>
                 <table class="form-table" role="presentation">
                     <tr>
+                        <th scope="row"><label for="newss_supadata_api_key">Supadata.ai API-Key</label></th>
+                        <td>
+                            <input type="password" id="newss_supadata_api_key" name="newss_supadata_api_key" value="<?php echo esc_attr($supadataKey); ?>" class="regular-text" autocomplete="off">
+                            <p class="description">
+                                Empfohlen für Cloud-Hosting. Account: <a href="https://supadata.ai" target="_blank" rel="noopener">supadata.ai</a>.
+                                Wenn gesetzt, wird Supadata <strong>vor</strong> yt-dlp probiert.
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
                         <th scope="row"><label for="newss_ytdlp_path">yt-dlp Pfad</label></th>
-                        <td><input type="text" id="newss_ytdlp_path" name="newss_ytdlp_path" value="<?php echo esc_attr($ytdlp); ?>" class="regular-text"></td>
+                        <td>
+                            <input type="text" id="newss_ytdlp_path" name="newss_ytdlp_path" value="<?php echo esc_attr($ytdlp); ?>" class="regular-text">
+                            <p class="description">Fallback wenn Supadata-Key leer ist oder ein Request scheitert.</p>
+                        </td>
                     </tr>
                     <tr>
                         <th scope="row">Whisper-Fallback (OpenAI)</th>
                         <td>
-                            <label><input type="checkbox" name="newss_whisper_enabled" value="1" <?php checked($whEnabled, 1); ?>> Aktivieren, wenn yt-dlp keine Captions findet</label>
+                            <label><input type="checkbox" name="newss_whisper_enabled" value="1" <?php checked($whEnabled, 1); ?>> Aktivieren — wird probiert wenn Supadata + yt-dlp beide leer ausgehen</label>
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="newss_whisper_api_key">OpenAI API-Key</label></th>
+                        <th scope="row"><label for="newss_whisper_api_key">OpenAI API-Key (für Whisper)</label></th>
                         <td><input type="password" id="newss_whisper_api_key" name="newss_whisper_api_key" value="<?php echo esc_attr($whKey); ?>" class="regular-text" autocomplete="off"></td>
                     </tr>
                 </table>

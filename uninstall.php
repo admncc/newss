@@ -11,6 +11,7 @@ $options = [
     'newss_anthropic_temperature',
     'newss_system_prompt',
     'newss_user_prompt_template',
+    'newss_supadata_api_key',
     'newss_ytdlp_path',
     'newss_whisper_enabled',
     'newss_whisper_api_key',

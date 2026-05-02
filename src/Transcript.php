@@ -8,6 +8,14 @@ final class Transcript
 {
     public function fetch(string $videoId): string
     {
+        $supadataKey = (string) get_option('newss_supadata_api_key', '');
+        if ($supadataKey !== '') {
+            $text = $this->fetchSupadata($videoId, $supadataKey);
+            if ($text !== '') {
+                return $text;
+            }
+        }
+
         $text = $this->fetchYtDlp($videoId);
         if ($text !== '') {
             return $text;
@@ -19,6 +27,48 @@ final class Transcript
             }
         }
         return '';
+    }
+
+    private function fetchSupadata(string $videoId, string $apiKey): string
+    {
+        $url = add_query_arg([
+            'url'  => 'https://www.youtube.com/watch?v=' . $videoId,
+            'lang' => 'de',
+            'text' => 'true',
+        ], 'https://api.supadata.ai/v1/youtube/transcript');
+
+        $resp = wp_remote_get($url, [
+            'timeout' => 60,
+            'headers' => [
+                'x-api-key' => $apiKey,
+                'Accept'    => 'application/json',
+            ],
+        ]);
+
+        if (is_wp_error($resp)) {
+            error_log('[newss] supadata error: ' . $resp->get_error_message());
+            return '';
+        }
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        $body = (string) wp_remote_retrieve_body($resp);
+        if ($code !== 200) {
+            error_log("[newss] supadata HTTP {$code}: " . substr($body, 0, 500));
+            return '';
+        }
+        $data = json_decode($body, true);
+        if (!is_array($data)) {
+            return '';
+        }
+
+        $text = (string) ($data['content'] ?? $data['text'] ?? '');
+        if ($text === '' && isset($data['transcript']) && is_array($data['transcript'])) {
+            $parts = array_map(
+                static fn($seg): string => is_array($seg) ? (string) ($seg['text'] ?? '') : '',
+                $data['transcript']
+            );
+            $text = implode(' ', $parts);
+        }
+        return trim(preg_replace('/\s+/', ' ', $text) ?? '');
     }
 
     private function fetchYtDlp(string $videoId): string
