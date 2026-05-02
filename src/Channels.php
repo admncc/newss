@@ -6,153 +6,163 @@ namespace Newss;
 
 final class Channels
 {
-    private const PAGE_SLUG = 'newss-channels';
     private const OPTION_KEY = 'newss_channels';
 
     public static function register(): void
     {
-        add_action('admin_menu', [self::class, 'addMenu'], 11);
-        add_action('admin_post_newss_channel_save', [self::class, 'handleSave']);
+        add_action('admin_post_newss_channel_add', [self::class, 'handleAdd']);
         add_action('admin_post_newss_channel_delete', [self::class, 'handleDelete']);
+        add_action('admin_post_newss_channel_toggle', [self::class, 'handleToggle']);
     }
 
-    public static function addMenu(): void
+    public static function renderSection(): void
     {
-        add_submenu_page(
-            'newss-settings',
-            'Newss – Kanäle',
-            'Kanäle',
-            'manage_options',
-            self::PAGE_SLUG,
-            [self::class, 'renderPage']
-        );
-    }
-
-    public static function renderPage(): void
-    {
-        if (!current_user_can('manage_options')) {
-            return;
-        }
         $channels = self::all();
+        $notice   = get_transient('newss_channel_notice');
+        if ($notice) {
+            delete_transient('newss_channel_notice');
+        }
         ?>
-        <div class="wrap">
-            <h1>Newss – Kanäle</h1>
+        <h2>Kanäle</h2>
 
-            <?php if (isset($_GET['saved'])): ?>
-                <div class="notice notice-success is-dismissible"><p>Kanal gespeichert.</p></div>
-            <?php elseif (isset($_GET['deleted'])): ?>
-                <div class="notice notice-success is-dismissible"><p>Kanal gelöscht.</p></div>
-            <?php elseif (isset($_GET['error'])): ?>
-                <div class="notice notice-error is-dismissible"><p><?php echo esc_html((string) $_GET['error']); ?></p></div>
-            <?php endif; ?>
+        <?php if (is_array($notice)): ?>
+            <div class="notice notice-<?php echo esc_attr((string) $notice['type']); ?> is-dismissible">
+                <p><?php echo esc_html((string) $notice['message']); ?></p>
+            </div>
+        <?php endif; ?>
 
-            <h2>Hinzufügen / Bearbeiten</h2>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <input type="hidden" name="action" value="newss_channel_save">
-                <?php wp_nonce_field('newss_channel_save'); ?>
-                <table class="form-table" role="presentation">
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="background:#f6f7f7;padding:12px 16px;border:1px solid #dcdcde;max-width:880px;margin-bottom:16px">
+            <input type="hidden" name="action" value="newss_channel_add">
+            <?php wp_nonce_field('newss_channel_add'); ?>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row" style="width:160px"><label for="newss_ch_input">Kanal-Link / Handle / ID</label></th>
+                    <td>
+                        <input type="text" id="newss_ch_input" name="input" class="large-text" required
+                               placeholder="https://www.youtube.com/@phoenix  oder  @phoenix  oder  UCwyiPnNlT8UABRmGmU0T9jg">
+                        <p class="description">Akzeptiert Channel-URL (<code>/channel/UC…</code>, <code>/@handle</code>, <code>/c/…</code>, <code>/user/…</code>), nur Handle (<code>@name</code>) oder direkte Channel-ID.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="newss_ch_name">Anzeigename (optional)</label></th>
+                    <td><input type="text" id="newss_ch_name" name="name" class="regular-text" placeholder="leer = automatisch ermitteln"></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="newss_ch_cat">Kategorie</label></th>
+                    <td><?php wp_dropdown_categories([
+                        'show_option_none'  => '— Default verwenden —',
+                        'option_none_value' => 0,
+                        'name'              => 'category',
+                        'selected'          => 0,
+                        'hide_empty'        => false,
+                        'id'                => 'newss_ch_cat',
+                    ]); ?></td>
+                </tr>
+                <tr>
+                    <th scope="row">Aktiv</th>
+                    <td><label><input type="checkbox" name="enabled" value="1" checked> Sofort beim nächsten Polling berücksichtigen</label></td>
+                </tr>
+            </table>
+            <p><button type="submit" class="button button-primary">Kanal hinzufügen</button></p>
+        </form>
+
+        <h3 style="margin-top:24px">Aktive Kanäle (<?php echo count($channels); ?>)</h3>
+        <?php if (!$channels): ?>
+            <p><em>Noch keine Kanäle konfiguriert.</em></p>
+        <?php else: ?>
+            <table class="widefat striped" style="max-width:880px">
+                <thead>
                     <tr>
-                        <th scope="row"><label for="ch_id">YouTube Channel-ID</label></th>
+                        <th style="width:30%">Name</th>
+                        <th>Channel-ID</th>
+                        <th>Kategorie</th>
+                        <th style="width:80px">Status</th>
+                        <th style="width:160px">Aktion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($channels as $ch):
+                    $catName = $ch['category'] ? get_cat_name((int) $ch['category']) : '— Default —';
+                    $delUrl = wp_nonce_url(
+                        admin_url('admin-post.php?action=newss_channel_delete&id=' . rawurlencode($ch['id'])),
+                        'newss_channel_delete_' . $ch['id']
+                    );
+                    $toggleUrl = wp_nonce_url(
+                        admin_url('admin-post.php?action=newss_channel_toggle&id=' . rawurlencode($ch['id'])),
+                        'newss_channel_toggle_' . $ch['id']
+                    );
+                    $isActive = !empty($ch['enabled']);
+                    ?>
+                    <tr>
                         <td>
-                            <input type="text" id="ch_id" name="id" class="regular-text" required pattern="UC[A-Za-z0-9_-]{22}" placeholder="UCxxxxxxxxxxxxxxxxxxxxxx">
-                            <p class="description">Format <code>UC…</code> (24 Zeichen). Findest du auf der Kanalseite via „Teilen → Kanal-URL kopieren".</p>
+                            <strong><?php echo esc_html((string) $ch['name']); ?></strong><br>
+                            <a href="https://www.youtube.com/channel/<?php echo esc_attr((string) $ch['id']); ?>" target="_blank" rel="noopener" style="font-size:11px">→ YouTube</a>
+                        </td>
+                        <td><code style="font-size:11px"><?php echo esc_html((string) $ch['id']); ?></code></td>
+                        <td><?php echo esc_html((string) $catName); ?></td>
+                        <td>
+                            <a href="<?php echo esc_url($toggleUrl); ?>" title="Status umschalten" style="text-decoration:none">
+                                <?php echo $isActive ? '<span style="color:#0a7">● aktiv</span>' : '<span style="color:#999">○ aus</span>'; ?>
+                            </a>
+                        </td>
+                        <td>
+                            <a href="<?php echo esc_url($delUrl); ?>" class="button button-small button-link-delete"
+                               onclick="return confirm('Kanal „<?php echo esc_js((string) $ch['name']); ?>" wirklich löschen?')">Löschen</a>
                         </td>
                     </tr>
-                    <tr>
-                        <th scope="row"><label for="ch_name">Anzeigename</label></th>
-                        <td><input type="text" id="ch_name" name="name" class="regular-text" required></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="ch_cat">Kategorie</label></th>
-                        <td><?php wp_dropdown_categories([
-                            'show_option_none'  => '— Default verwenden —',
-                            'option_none_value' => 0,
-                            'name'              => 'category',
-                            'selected'          => 0,
-                            'hide_empty'        => false,
-                            'id'                => 'ch_cat',
-                        ]); ?></td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Aktiv</th>
-                        <td><label><input type="checkbox" name="enabled" value="1" checked> Beim nächsten Polling berücksichtigen</label></td>
-                    </tr>
-                </table>
-                <?php submit_button('Kanal speichern'); ?>
-            </form>
-
-            <h2>Vorhandene Kanäle (<?php echo count($channels); ?>)</h2>
-            <?php if (!$channels): ?>
-                <p>Noch keine Kanäle konfiguriert.</p>
-            <?php else: ?>
-                <table class="widefat striped">
-                    <thead>
-                        <tr><th>Name</th><th>Channel-ID</th><th>Kategorie</th><th>Aktiv</th><th>Aktion</th></tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($channels as $ch):
-                        $catName = $ch['category'] ? get_cat_name((int) $ch['category']) : '— Default —';
-                        $delUrl = wp_nonce_url(
-                            admin_url('admin-post.php?action=newss_channel_delete&id=' . rawurlencode($ch['id'])),
-                            'newss_channel_delete_' . $ch['id']
-                        );
-                        ?>
-                        <tr>
-                            <td><strong><?php echo esc_html((string) $ch['name']); ?></strong></td>
-                            <td><code><?php echo esc_html((string) $ch['id']); ?></code></td>
-                            <td><?php echo esc_html((string) $catName); ?></td>
-                            <td><?php echo !empty($ch['enabled']) ? '✔' : '—'; ?></td>
-                            <td><a href="<?php echo esc_url($delUrl); ?>" class="button button-small" onclick="return confirm('Kanal wirklich löschen?')">Löschen</a></td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php endif; ?>
-        </div>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+        <hr style="margin:32px 0">
         <?php
     }
 
-    public static function handleSave(): void
+    public static function handleAdd(): void
     {
         if (!current_user_can('manage_options')) {
             wp_die('Forbidden');
         }
-        check_admin_referer('newss_channel_save');
+        check_admin_referer('newss_channel_add');
 
-        $id = sanitize_text_field((string) ($_POST['id'] ?? ''));
-        if (!preg_match('/^UC[A-Za-z0-9_-]{22}$/', $id)) {
-            self::redirect(['error' => 'Ungültige Channel-ID']);
+        $input = (string) ($_POST['input'] ?? '');
+        $resolved = (new ChannelResolver())->resolve($input);
+        if ($resolved === null) {
+            self::flash('error', 'Konnte den Kanal nicht auflösen. URL/Handle/ID prüfen.');
+            self::redirect();
             return;
         }
-        $name = sanitize_text_field((string) ($_POST['name'] ?? ''));
-        if ($name === '') {
-            self::redirect(['error' => 'Name fehlt']);
-            return;
-        }
+
+        $overrideName = sanitize_text_field((string) ($_POST['name'] ?? ''));
+        $name = $overrideName !== '' ? $overrideName : (string) $resolved['name'];
 
         $entry = [
-            'id'       => $id,
+            'id'       => (string) $resolved['id'],
             'name'     => $name,
             'category' => (int) ($_POST['category'] ?? 0),
             'enabled'  => !empty($_POST['enabled']) ? 1 : 0,
         ];
 
         $channels = self::all();
-        $found = false;
+        $duplicate = false;
         foreach ($channels as &$ch) {
-            if ($ch['id'] === $id) {
+            if ($ch['id'] === $entry['id']) {
                 $ch = $entry;
-                $found = true;
+                $duplicate = true;
                 break;
             }
         }
         unset($ch);
-        if (!$found) {
+        if (!$duplicate) {
             $channels[] = $entry;
         }
         update_option(self::OPTION_KEY, $channels, false);
 
-        self::redirect(['saved' => '1']);
+        self::flash('success', $duplicate
+            ? sprintf('Kanal „%s" aktualisiert.', $name)
+            : sprintf('Kanal „%s" hinzugefügt (%s).', $name, $entry['id'])
+        );
+        self::redirect();
     }
 
     public static function handleDelete(): void
@@ -169,7 +179,30 @@ final class Channels
         ));
         update_option(self::OPTION_KEY, $channels, false);
 
-        self::redirect(['deleted' => '1']);
+        self::flash('success', 'Kanal gelöscht.');
+        self::redirect();
+    }
+
+    public static function handleToggle(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+        $id = (string) ($_GET['id'] ?? '');
+        check_admin_referer('newss_channel_toggle_' . $id);
+
+        $channels = self::all();
+        foreach ($channels as &$ch) {
+            if (($ch['id'] ?? '') === $id) {
+                $ch['enabled'] = empty($ch['enabled']) ? 1 : 0;
+                break;
+            }
+        }
+        unset($ch);
+        update_option(self::OPTION_KEY, $channels, false);
+
+        self::flash('success', 'Status umgeschaltet.');
+        self::redirect();
     }
 
     private static function all(): array
@@ -178,12 +211,14 @@ final class Channels
         return is_array($value) ? $value : [];
     }
 
-    private static function redirect(array $args): void
+    private static function flash(string $type, string $message): void
     {
-        wp_safe_redirect(add_query_arg(
-            $args,
-            admin_url('admin.php?page=' . self::PAGE_SLUG)
-        ));
+        set_transient('newss_channel_notice', ['type' => $type, 'message' => $message], 30);
+    }
+
+    private static function redirect(): void
+    {
+        wp_safe_redirect(admin_url('admin.php?page=newss-settings'));
         exit;
     }
 }

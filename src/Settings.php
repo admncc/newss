@@ -160,6 +160,8 @@ final class Settings
                 <code>define('DISABLE_WP_CRON', true);</code>
             </p>
 
+            <?php Channels::renderSection(); ?>
+
             <form method="post" action="options.php">
                 <?php settings_fields(self::OPTION_GROUP); ?>
 
