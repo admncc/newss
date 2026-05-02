@@ -17,20 +17,22 @@ final class PostBuilder
         $defaultStatus = (string) get_option('newss_default_status', 'publish');
         $status = $killSwitch ? 'draft' : ($defaultStatus === 'draft' ? 'draft' : 'publish');
 
-        $bodyHtml = $this->sanitizeBodyHtml((string) ($rewrite['body_html'] ?? ''));
+        $title           = sanitize_text_field((string) ($rewrite['title'] ?? ''));
+        $slug            = sanitize_title((string) ($rewrite['slug'] ?? ''));
+        $focusKeyword    = sanitize_text_field((string) ($rewrite['focus_keyword'] ?? ''));
+        $metaDescription = sanitize_text_field((string) ($rewrite['meta_description'] ?? ''));
+        $imageAlt        = sanitize_text_field((string) ($rewrite['image_alt'] ?? ''));
+        $aiCategory      = (string) ($rewrite['category'] ?? '');
+        $bodyHtml        = $this->sanitizeBodyHtml((string) ($rewrite['body_html'] ?? ''));
 
         $content = $this->embedHtml($videoId, $channel, $channelId, $published)
             . "\n\n" . $bodyHtml
             . "\n\n" . $this->disclosureHtml($channel);
 
-        $categoryIds = [];
-        $categoryId  = (int) ($payload['category_id'] ?? 0);
-        if ($categoryId === 0) {
-            $categoryId = (int) get_option('newss_default_category', 0);
-        }
-        if ($categoryId > 0) {
-            $categoryIds[] = $categoryId;
-        }
+        $categoryIds = $this->resolveCategories(
+            (int) ($payload['category_id'] ?? 0),
+            $aiCategory
+        );
 
         $authorId = (int) get_option('newss_post_author', 0);
         if ($authorId === 0) {
@@ -42,20 +44,35 @@ final class PostBuilder
             (array) ($rewrite['tags'] ?? [])
         )));
 
+        $metaInput = [
+            '_newss_video_id'   => $videoId,
+            '_newss_channel_id' => $channelId,
+            '_newss_source_url' => 'https://www.youtube.com/watch?v=' . $videoId,
+        ];
+
+        if ($focusKeyword !== '') {
+            $metaInput['rank_math_focus_keyword']  = $focusKeyword;
+            $metaInput['_yoast_wpseo_focuskw']     = $focusKeyword;
+        }
+        if ($metaDescription !== '') {
+            $metaInput['rank_math_description']    = $metaDescription;
+            $metaInput['_yoast_wpseo_metadesc']    = $metaDescription;
+        }
+        if ($title !== '') {
+            $metaInput['rank_math_title']          = $title;
+            $metaInput['_yoast_wpseo_title']       = $title;
+        }
+
         $postArr = [
-            'post_title'    => sanitize_text_field((string) ($rewrite['title'] ?? '')),
-            'post_name'     => sanitize_title((string) ($rewrite['slug'] ?? '')),
-            'post_excerpt'  => sanitize_text_field((string) ($rewrite['excerpt'] ?? '')),
+            'post_title'    => $title,
+            'post_name'     => $slug,
+            'post_excerpt'  => $metaDescription,
             'post_content'  => $content,
             'post_status'   => $status,
             'post_author'   => $authorId,
             'post_category' => $categoryIds,
             'tags_input'    => $tags,
-            'meta_input'    => [
-                '_newss_video_id'   => $videoId,
-                '_newss_channel_id' => $channelId,
-                '_newss_source_url' => 'https://www.youtube.com/watch?v=' . $videoId,
-            ],
+            'meta_input'    => $metaInput,
         ];
 
         if ($published !== '') {
@@ -73,8 +90,41 @@ final class PostBuilder
             throw new \RuntimeException('wp_insert_post failed: ' . $postId->get_error_message());
         }
 
-        $this->setFeaturedImage((int) $postId, $videoId);
+        $this->setFeaturedImage((int) $postId, $videoId, $imageAlt !== '' ? $imageAlt : $title);
         return (int) $postId;
+    }
+
+    private function resolveCategories(int $perChannelOverride, string $aiCategoryName): array
+    {
+        if ($perChannelOverride > 0) {
+            return [$perChannelOverride];
+        }
+
+        if ($aiCategoryName !== '') {
+            $allowed = Anthropic::categoryList();
+            if (in_array($aiCategoryName, $allowed, true)) {
+                $termId = $this->ensureCategoryByName($aiCategoryName);
+                if ($termId > 0) {
+                    return [$termId];
+                }
+            }
+        }
+
+        $defaultCat = (int) get_option('newss_default_category', 0);
+        return $defaultCat > 0 ? [$defaultCat] : [];
+    }
+
+    private function ensureCategoryByName(string $name): int
+    {
+        $term = get_term_by('name', $name, 'category');
+        if ($term && !is_wp_error($term)) {
+            return (int) $term->term_id;
+        }
+        $created = wp_insert_term($name, 'category');
+        if (is_wp_error($created)) {
+            return 0;
+        }
+        return (int) $created['term_id'];
     }
 
     private function embedHtml(string $videoId, string $channel, string $channelId, string $published): string
@@ -113,8 +163,13 @@ final class PostBuilder
     {
         return wp_kses($html, [
             'p'      => [],
+            'h2'     => [],
+            'h3'     => [],
             'strong' => [],
             'em'     => [],
+            'ul'     => [],
+            'ol'     => [],
+            'li'     => [],
             'br'     => [],
         ]);
     }
@@ -131,7 +186,7 @@ final class PostBuilder
         }
     }
 
-    private function setFeaturedImage(int $postId, string $videoId): void
+    private function setFeaturedImage(int $postId, string $videoId, string $altText): void
     {
         if ($postId === 0 || $videoId === '') {
             return;
@@ -155,11 +210,15 @@ final class PostBuilder
             }
             $attachId = media_handle_sideload(
                 ['name' => "yt-{$videoId}.jpg", 'tmp_name' => $tmp],
-                $postId
+                $postId,
+                $altText
             );
             if (is_wp_error($attachId)) {
                 @unlink($tmp);
                 continue;
+            }
+            if ($altText !== '') {
+                update_post_meta((int) $attachId, '_wp_attachment_image_alt', $altText);
             }
             set_post_thumbnail($postId, $attachId);
             return;

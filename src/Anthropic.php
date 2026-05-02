@@ -82,41 +82,120 @@ final class Anthropic
 
     private static function publishArticleTool(): array
     {
+        $categories = self::categoryList();
+        $categoryProp = [
+            'type'        => 'string',
+            'description' => 'Wähle die thematisch passendste Kategorie aus der vorgegebenen Liste.',
+        ];
+        if ($categories !== []) {
+            $categoryProp['enum'] = $categories;
+        }
+
         return [
             'name'        => 'publish_article',
-            'description' => 'Veröffentliche den umgeschriebenen Artikel als strukturierte Daten.',
+            'description' => 'Veröffentliche den umgeschriebenen Artikel als strukturierte Daten (SEO-optimiert).',
             'input_schema' => [
                 'type'     => 'object',
-                'required' => ['title', 'slug', 'excerpt', 'body_html', 'tags'],
+                'required' => ['title', 'slug', 'focus_keyword', 'meta_description', 'category', 'body_html', 'tags', 'image_alt'],
                 'properties' => [
-                    'title'     => ['type' => 'string', 'maxLength' => 100],
-                    'slug'      => ['type' => 'string', 'maxLength' => 80],
-                    'excerpt'   => ['type' => 'string', 'maxLength' => 200],
-                    'body_html' => ['type' => 'string'],
-                    'tags'      => [
+                    'category' => $categoryProp,
+                    'title' => [
+                        'type'        => 'string',
+                        'minLength'   => 30,
+                        'maxLength'   => 65,
+                        'description' => 'SEO-Title, 30–65 Zeichen, Fokus-Keyword möglichst weit vorne.',
+                    ],
+                    'slug' => [
+                        'type'        => 'string',
+                        'minLength'   => 10,
+                        'maxLength'   => 60,
+                        'pattern'     => '^[a-z0-9-]+$',
+                        'description' => 'URL-Slug, 3–6 Wörter, kleinbuchstaben + Bindestriche, mit Fokus-Keyword.',
+                    ],
+                    'focus_keyword' => [
+                        'type'        => 'string',
+                        'minLength'   => 3,
+                        'maxLength'   => 50,
+                        'description' => 'Wichtigstes Suchwort (1–4 Wörter, möglichst Singular).',
+                    ],
+                    'meta_description' => [
+                        'type'        => 'string',
+                        'minLength'   => 120,
+                        'maxLength'   => 160,
+                        'description' => 'Meta-Description für SERPs, 120–160 Zeichen, Fokus-Keyword einmal, aktive Sprache, anderer Wortlaut als der Title.',
+                    ],
+                    'body_html' => [
+                        'type'        => 'string',
+                        'description' => 'Artikel als HTML, 400–600 Wörter, mit <h2>-Zwischenüberschriften.',
+                    ],
+                    'tags' => [
                         'type'     => 'array',
                         'items'    => ['type' => 'string', 'maxLength' => 40],
+                        'minItems' => 3,
                         'maxItems' => 6,
+                    ],
+                    'image_alt' => [
+                        'type'        => 'string',
+                        'minLength'   => 40,
+                        'maxLength'   => 125,
+                        'description' => 'Alt-Text für das Featured Image, beschreibt Bildinhalt + enthält Fokus-Keyword.',
                     ],
                 ],
             ],
         ];
     }
 
+    public static function categoryList(): array
+    {
+        $raw = (string) get_option('newss_category_list', self::defaultCategoriesText());
+        $names = array_map('trim', preg_split('/\R/', $raw) ?: []);
+        return array_values(array_filter($names, static fn(string $n): bool => $n !== ''));
+    }
+
+    public static function defaultCategoriesText(): string
+    {
+        return implode("\n", [
+            'Weltpolitik',
+            'Innenpolitik',
+            'Europa',
+            'Wirtschaft & Finanzen',
+            'Gesellschaft',
+            'Klima & Umwelt',
+            'Kultur & Medien',
+            'Technologie',
+            'Sport',
+        ]);
+    }
+
     public static function defaultSystemPrompt(): string
     {
         return <<<PROMPT
-Du bist ein erfahrener Online-Redakteur für ein deutschsprachiges Nachrichtenportal.
+Du bist ein erfahrener Online-Redakteur und SEO-Texter für ein deutschsprachiges Nachrichtenportal.
 
-Aufgabe: Aus dem Transkript eines YouTube-Videos einen eigenständigen Artikel von 250–350 Wörtern verfassen.
+Aufgabe: Aus dem Transkript eines YouTube-Videos einen SEO-optimierten, eigenständigen Artikel verfassen.
 
-Regeln:
-- Sachlich, präzise, journalistisch — keine Floskeln wie „Im Video sehen wir" oder „Der Sprecher sagt"
-- Schreibe direkt über das Thema, nicht über das Video
-- 4–6 wichtige Begriffe in <strong>fett</strong>
-- Strukturiere in 4–6 kurze Absätze mit <p>...</p>
-- Erlaubte HTML-Tags: <p>, <strong>, <em> — keine anderen
-- Wenn das Transkript zu kurz oder unklar ist, gib einen kürzeren Artikel zurück; erfinde keine Fakten
+SEO-Vorgaben (Pflicht):
+- Fokus-Keyword: das wichtigste Suchwort des Themas, 1–4 Wörter, möglichst Singular
+- Title: 30–65 Zeichen, Fokus-Keyword möglichst weit vorne, klickstark aber nicht reißerisch, kein Clickbait
+- Slug: 3–6 Wörter, nur Kleinbuchstaben und Bindestriche, mit Fokus-Keyword
+- Meta-Description: 120–160 Zeichen, Fokus-Keyword genau einmal, aktive Sprache, in eigenen Worten — nicht den Title wiederholen
+- Image-Alt: 40–125 Zeichen, beschreibt was im Bild zu sehen wäre, enthält Fokus-Keyword
+- Tags: 3–6 thematisch relevante Begriffe (Personennamen, Orte, Schlüsselthemen)
+- Kategorie: wähle exakt eine Kategorie aus der vorgegebenen Liste (siehe Tool-Schema enum). Wenn nichts perfekt passt, nimm die thematisch nächstliegende — keine eigene Kategorie erfinden.
+
+Body-Struktur (400–600 Wörter):
+- Lead-Absatz: Fokus-Keyword in den ersten 100 Wörtern, beantwortet die wichtigsten W-Fragen direkt
+- 2–3 <h2>-Zwischenüberschriften, jede mit eigenem Themen-Aspekt; das Fokus-Keyword oder ein Synonym in mindestens einer <h2>
+- 4–6 wichtige Begriffe im Body in <strong>fett</strong>
+- Wenn inhaltlich passend: eine <ul>-Aufzählungsliste mit 3–5 Punkten
+- Kurze Absätze (2–4 Sätze)
+- Erlaubte HTML-Tags ausschließlich: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <ol>, <li>, <br>
+- Keine <a>-Links, keine externen Verweise erfinden
+
+Stil:
+- Sachlich, präzise, journalistisch
+- Keine Floskeln wie „Im Video sehen wir" oder „Der Sprecher sagt" — schreib direkt über das Thema
+- Wenn Transkript zu kurz oder unklar: einen kürzeren Artikel zurückgeben; keine Fakten halluzinieren
 
 Antworte ausschließlich über das Tool `publish_article` mit gültigen Werten gemäß Schema.
 PROMPT;

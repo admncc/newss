@@ -50,6 +50,7 @@ final class Settings
             'newss_whisper_enabled'        => 'absint',
             'newss_whisper_api_key'        => 'sanitize_text_field',
             'newss_default_category'       => 'absint',
+            'newss_category_list'          => [self::class, 'sanitizeMultiline'],
             'newss_default_status'         => [self::class, 'sanitizeStatus'],
             'newss_kill_switch_drafts'     => 'absint',
             'newss_post_author'            => 'absint',
@@ -100,7 +101,7 @@ final class Settings
 
         $apiKey      = (string) get_option('newss_anthropic_api_key', '');
         $model       = (string) get_option('newss_anthropic_model', 'claude-sonnet-4-6');
-        $maxTokens   = (int)    get_option('newss_anthropic_max_tokens', 2000);
+        $maxTokens   = (int)    get_option('newss_anthropic_max_tokens', 3000);
         $temperature = (float)  get_option('newss_anthropic_temperature', 1.0);
         $systemPrompt= (string) get_option('newss_system_prompt', Anthropic::defaultSystemPrompt());
         $userTpl     = (string) get_option('newss_user_prompt_template', Anthropic::defaultUserTemplate());
@@ -108,6 +109,7 @@ final class Settings
         $whEnabled   = (int)    get_option('newss_whisper_enabled', 0);
         $whKey       = (string) get_option('newss_whisper_api_key', '');
         $defCat      = (int)    get_option('newss_default_category', 0);
+        $catList     = (string) get_option('newss_category_list', Anthropic::defaultCategoriesText());
         $defStatus   = (string) get_option('newss_default_status', 'publish');
         $killSwitch  = (int)    get_option('newss_kill_switch_drafts', 0);
         $postAuthor  = (int)    get_option('newss_post_author', 0);
@@ -234,7 +236,18 @@ final class Settings
                                 'hide_empty'        => false,
                             ]);
                             ?>
-                            <p class="description">Greift, wenn beim Kanal keine eigene Kategorie gesetzt ist.</p>
+                            <p class="description">Wird genutzt, wenn die KI keine passende Kategorie auswählt und kein Kanal-Override gesetzt ist.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="newss_category_list">Kategorien-Liste (KI-Auswahl)</label></th>
+                        <td>
+                            <textarea id="newss_category_list" name="newss_category_list" rows="10" class="large-text code" placeholder="Eine Kategorie pro Zeile"><?php echo esc_textarea($catList); ?></textarea>
+                            <p class="description">
+                                Eine Kategorie pro Zeile. Claude wählt für jeden Artikel exakt eine aus dieser Liste.
+                                Fehlende Kategorien werden bei Bedarf in WordPress automatisch angelegt.<br>
+                                <strong>Override:</strong> Wenn beim Kanal eine Kategorie gesetzt ist, gewinnt diese — die KI-Auswahl wird ignoriert.
+                            </p>
                         </td>
                     </tr>
                     <tr>

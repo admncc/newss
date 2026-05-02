@@ -15,6 +15,7 @@ $options = [
     'newss_whisper_enabled',
     'newss_whisper_api_key',
     'newss_default_category',
+    'newss_category_list',
     'newss_default_status',
     'newss_kill_switch_drafts',
     'newss_post_author',
