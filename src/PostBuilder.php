@@ -135,7 +135,7 @@ final class PostBuilder
         $publishedDe = $this->formatDateDe($published);
 
         return sprintf(
-            '<div class="newss-embed" style="margin:0 0 20px 0;width:100%%;max-width:100%%;aspect-ratio:16/9;background:#000;">'
+            '<div class="newss-embed" style="aspect-ratio:16/9;margin:0 0 20px 0;background:#000;">'
             . '<iframe src="%s" style="width:100%%;height:100%%;border:0;display:block;"'
             . ' allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen loading="lazy"></iframe>'
             . '</div>'
