@@ -102,7 +102,7 @@ final class Settings
 
         $apiKey      = (string) get_option('newss_anthropic_api_key', '');
         $model       = (string) get_option('newss_anthropic_model', 'claude-sonnet-4-6');
-        $maxTokens   = (int)    get_option('newss_anthropic_max_tokens', 3000);
+        $maxTokens   = (int)    get_option('newss_anthropic_max_tokens', 4000);
         $temperature = (float)  get_option('newss_anthropic_temperature', 1.0);
         $systemPrompt= (string) get_option('newss_system_prompt', Anthropic::defaultSystemPrompt());
         $userTpl     = (string) get_option('newss_user_prompt_template', Anthropic::defaultUserTemplate());

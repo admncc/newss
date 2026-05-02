@@ -18,7 +18,7 @@ final class Anthropic
         }
 
         $model       = (string) get_option('newss_anthropic_model', 'claude-sonnet-4-6');
-        $maxTokens   = (int) get_option('newss_anthropic_max_tokens', 2000);
+        $maxTokens   = (int) get_option('newss_anthropic_max_tokens', 4000);
         $temperature = (float) get_option('newss_anthropic_temperature', 1.0);
         $system      = (string) get_option('newss_system_prompt', self::defaultSystemPrompt());
         $template    = (string) get_option('newss_user_prompt_template', self::defaultUserTemplate());
@@ -183,12 +183,14 @@ SEO-Vorgaben (Pflicht):
 - Tags: 3–6 thematisch relevante Begriffe (Personennamen, Orte, Schlüsselthemen)
 - Kategorie: wähle exakt eine Kategorie aus der vorgegebenen Liste (siehe Tool-Schema enum). Wenn nichts perfekt passt, nimm die thematisch nächstliegende — keine eigene Kategorie erfinden.
 
-Body-Struktur (400–600 Wörter):
-- Lead-Absatz: Fokus-Keyword in den ersten 100 Wörtern, beantwortet die wichtigsten W-Fragen direkt
-- 2–3 <h2>-Zwischenüberschriften, jede mit eigenem Themen-Aspekt; das Fokus-Keyword oder ein Synonym in mindestens einer <h2>
-- 4–6 wichtige Begriffe im Body in <strong>fett</strong>
-- Wenn inhaltlich passend: eine <ul>-Aufzählungsliste mit 3–5 Punkten
+Body-Struktur (700–1000 Wörter):
+- Lead-Absatz (80–120 Wörter): Fokus-Keyword in den ersten 100 Wörtern, beantwortet die wichtigsten W-Fragen direkt
+- 3–4 <h2>-Zwischenüberschriften, jede mit eigenem Themen-Aspekt; das Fokus-Keyword oder ein Synonym in mindestens einer <h2>
+- Pro <h2>-Sektion 150–250 Wörter substantieller Inhalt
+- 6–10 wichtige Begriffe im Body in <strong>fett</strong>
+- Mindestens eine <ul>-Aufzählungsliste mit 3–5 Punkten wenn inhaltlich passend (z. B. Fakten, Standpunkte, Zahlen)
 - Kurze Absätze (2–4 Sätze)
+- Abschluss-Absatz mit Ausblick / Einordnung
 - Erlaubte HTML-Tags ausschließlich: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <ol>, <li>, <br>
 - Keine <a>-Links, keine externen Verweise erfinden
 
