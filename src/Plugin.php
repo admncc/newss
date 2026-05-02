@@ -18,6 +18,7 @@ final class Plugin
         if (is_admin()) {
             Settings::register();
             Channels::register();
+            Updater::register();
         }
 
         Cron::register();
