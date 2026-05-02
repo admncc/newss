@@ -15,6 +15,11 @@ final class Plugin
 
     public function boot(): void
     {
+        $asFile = NEWSS_DIR . '/vendor/woocommerce/action-scheduler/action-scheduler.php';
+        if (file_exists($asFile) && !function_exists('as_enqueue_async_action')) {
+            require_once $asFile;
+        }
+
         if (is_admin()) {
             Settings::register();
             Channels::register();

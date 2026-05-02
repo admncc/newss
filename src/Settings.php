@@ -304,7 +304,7 @@ final class Settings
     private static function detectBinary(string $bin): bool
     {
         if (str_starts_with($bin, '/')) {
-            return is_executable($bin);
+            return @is_executable($bin);
         }
         if (function_exists('shell_exec')) {
             $out = trim((string) @shell_exec(sprintf('command -v %s 2>/dev/null', escapeshellarg($bin))));
@@ -313,7 +313,7 @@ final class Settings
             }
         }
         foreach (['/usr/local/bin', '/usr/bin', '/snap/bin', '/usr/local/sbin', '/usr/sbin', '/bin'] as $dir) {
-            if (is_executable($dir . '/' . $bin)) {
+            if (@is_executable($dir . '/' . $bin)) {
                 return true;
             }
         }
