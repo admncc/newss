@@ -135,7 +135,7 @@ final class PostBuilder
         $publishedDe = $this->formatDateDe($published);
 
         return sprintf(
-            '<div class="newss-embed" style="aspect-ratio:16/9;margin:0 0 20px 0;background:#000;">'
+            '<div class="newss-embed" style="aspect-ratio:16/9;margin:0 auto 20px auto;max-width:70%%;background:#000;">'
             . '<iframe src="%s" style="width:100%%;height:100%%;border:0;display:block;"'
             . ' allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen loading="lazy"></iframe>'
             . '</div>'
@@ -152,11 +152,8 @@ final class PostBuilder
 
     private function disclosureHtml(string $channel): string
     {
-        return sprintf(
-            '<div class="newss-disclosure" style="margin-top:30px;padding:12px;border:1px solid #eee;background:#fafafa;font-size:0.85em;color:#555;">'
-            . '<p><strong>Hinweis:</strong> Dieser Artikel wurde mithilfe von KI auf Basis des verlinkten YouTube-Videos von %s erstellt und kann Fehler oder Ungenauigkeiten enthalten.</p></div>',
-            esc_html($channel)
-        );
+        return '<div class="newss-disclosure" style="margin-top:30px;padding:10px 12px;border:1px solid #eee;background:#fafafa;font-size:0.8em;color:#777;">'
+            . '<p>Dieser Artikel wurde KI-gestützt erstellt und kann Fehler enthalten.</p></div>';
     }
 
     private function sanitizeBodyHtml(string $html): string
