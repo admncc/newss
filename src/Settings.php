@@ -284,11 +284,21 @@ final class Settings
 
     private static function detectBinary(string $bin): bool
     {
-        if (!function_exists('shell_exec')) {
-            return false;
+        if (str_starts_with($bin, '/')) {
+            return is_executable($bin);
         }
-        $out = (string) @shell_exec(sprintf('command -v %s 2>/dev/null', escapeshellarg($bin)));
-        return trim($out) !== '';
+        if (function_exists('shell_exec')) {
+            $out = trim((string) @shell_exec(sprintf('command -v %s 2>/dev/null', escapeshellarg($bin))));
+            if ($out !== '') {
+                return true;
+            }
+        }
+        foreach (['/usr/local/bin', '/usr/bin', '/snap/bin', '/usr/local/sbin', '/usr/sbin', '/bin'] as $dir) {
+            if (is_executable($dir . '/' . $bin)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static function formatTime(int $ts): string
