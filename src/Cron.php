@@ -6,39 +6,38 @@ namespace Newss;
 
 final class Cron
 {
-    public const HOOK_MORNING = 'newss_cron_morning';
-    public const HOOK_EVENING = 'newss_cron_evening';
+    public const HOOK_HOURLY = 'newss_cron_hourly';
+
+    private const LEGACY_HOOKS = ['newss_cron_morning', 'newss_cron_evening'];
 
     public static function register(): void
     {
-        add_action(self::HOOK_MORNING, [RssPoller::class, 'pollAll']);
-        add_action(self::HOOK_EVENING, [RssPoller::class, 'pollAll']);
+        add_action(self::HOOK_HOURLY, [RssPoller::class, 'pollAll']);
+        add_action('init', [self::class, 'ensureScheduled']);
+    }
+
+    public static function ensureScheduled(): void
+    {
+        foreach (self::LEGACY_HOOKS as $hook) {
+            if (wp_next_scheduled($hook)) {
+                wp_clear_scheduled_hook($hook);
+            }
+        }
+        if (!wp_next_scheduled(self::HOOK_HOURLY)) {
+            wp_schedule_event(time() + 60, 'hourly', self::HOOK_HOURLY);
+        }
     }
 
     public static function scheduleEvents(): void
     {
-        $tz = new \DateTimeZone('Europe/Berlin');
-        foreach ([self::HOOK_MORNING => '09:00', self::HOOK_EVENING => '19:00'] as $hook => $time) {
-            if (wp_next_scheduled($hook)) {
-                continue;
-            }
-            wp_schedule_event(self::nextRunTimestamp($time, $tz), 'daily', $hook);
-        }
+        self::ensureScheduled();
     }
 
     public static function clearEvents(): void
     {
-        wp_clear_scheduled_hook(self::HOOK_MORNING);
-        wp_clear_scheduled_hook(self::HOOK_EVENING);
-    }
-
-    private static function nextRunTimestamp(string $hhmm, \DateTimeZone $tz): int
-    {
-        $now = new \DateTimeImmutable('now', $tz);
-        $target = $now->setTime((int) substr($hhmm, 0, 2), (int) substr($hhmm, 3, 2), 0);
-        if ($target <= $now) {
-            $target = $target->modify('+1 day');
+        wp_clear_scheduled_hook(self::HOOK_HOURLY);
+        foreach (self::LEGACY_HOOKS as $hook) {
+            wp_clear_scheduled_hook($hook);
         }
-        return $target->getTimestamp();
     }
 }
