@@ -14,6 +14,121 @@ final class Settings
         add_action('admin_menu', [self::class, 'addMenu']);
         add_action('admin_init', [self::class, 'registerSettings']);
         add_action('admin_post_newss_run_now', [self::class, 'handleRunNow']);
+        add_action('admin_post_newss_test_whisper', [self::class, 'handleTestWhisper']);
+    }
+
+    public static function handleTestWhisper(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+        check_admin_referer('newss_test_whisper');
+
+        $key = sanitize_text_field(wp_unslash((string) ($_POST['whisper_key'] ?? '')));
+        $keySource = 'eingegeben';
+        if ($key === '') {
+            $key = (string) get_option('newss_whisper_api_key', '');
+            $keySource = 'gespeichert';
+        }
+        if ($key === '') {
+            set_transient('newss_whisper_test', [
+                'type'    => 'error',
+                'lines'   => ['Kein Key gesetzt — sowohl Input-Feld als auch DB sind leer.'],
+            ], 60);
+            self::redirect();
+        }
+
+        $keyPrefix = substr($key, 0, 12);
+        $keyLen    = strlen($key);
+        $startedAt = microtime(true);
+
+        $resp = wp_remote_get('https://api.openai.com/v1/models', [
+            'timeout' => 20,
+            'headers' => ['Authorization' => 'Bearer ' . $key],
+        ]);
+
+        $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
+
+        $lines = [
+            sprintf('Key-Quelle: %s', $keySource),
+            sprintf('Key-Prefix: %s… (Länge: %d Zeichen)', $keyPrefix, $keyLen),
+            sprintf('Endpunkt: GET https://api.openai.com/v1/models'),
+            sprintf('Dauer: %d ms', $elapsedMs),
+        ];
+
+        if (is_wp_error($resp)) {
+            $lines[] = 'Network-Fehler (wp_error): ' . $resp->get_error_code() . ' — ' . $resp->get_error_message();
+            set_transient('newss_whisper_test', ['type' => 'error', 'lines' => $lines], 120);
+            self::redirect();
+        }
+
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        $body = (string) wp_remote_retrieve_body($resp);
+        $hdrs = wp_remote_retrieve_headers($resp);
+
+        $lines[] = sprintf('HTTP-Status: %d', $code);
+        $orgHeader = is_object($hdrs) && method_exists($hdrs, 'offsetGet') ? (string) ($hdrs['openai-organization'] ?? '') : '';
+        if ($orgHeader !== '') {
+            $lines[] = 'OpenAI-Org: ' . $orgHeader;
+        }
+        $rateRemain = is_object($hdrs) ? (string) ($hdrs['x-ratelimit-remaining-requests'] ?? '') : '';
+        if ($rateRemain !== '') {
+            $lines[] = 'Rate-Limit-Remaining: ' . $rateRemain;
+        }
+
+        if ($code === 200) {
+            $data = json_decode($body, true);
+            $modelCount = is_array($data) && isset($data['data']) ? count($data['data']) : 0;
+            $hasWhisper = false;
+            $whisperModels = [];
+            foreach (($data['data'] ?? []) as $m) {
+                $id = (string) ($m['id'] ?? '');
+                if (str_contains($id, 'whisper')) {
+                    $hasWhisper = true;
+                    $whisperModels[] = $id;
+                }
+            }
+            $lines[] = sprintf('Modelle erreichbar: %d', $modelCount);
+            $lines[] = $hasWhisper
+                ? 'Whisper-Modelle: ' . implode(', ', $whisperModels)
+                : 'Achtung: whisper-1 nicht in der Liste — Key-Permissions decken Audio nicht ab.';
+            set_transient('newss_whisper_test', [
+                'type'  => $hasWhisper ? 'success' : 'warning',
+                'lines' => $lines,
+            ], 120);
+            self::redirect();
+        }
+
+        $errMsg = '';
+        $errCode = '';
+        $errType = '';
+        $data = json_decode($body, true);
+        if (is_array($data) && isset($data['error'])) {
+            $errMsg  = (string) ($data['error']['message'] ?? '');
+            $errCode = (string) ($data['error']['code'] ?? '');
+            $errType = (string) ($data['error']['type'] ?? '');
+        }
+        $lines[] = sprintf('error.code: %s', $errCode ?: '—');
+        $lines[] = sprintf('error.type: %s', $errType ?: '—');
+        $lines[] = 'error.message: ' . ($errMsg ?: '(keine)');
+        $lines[] = 'Body-Auszug: ' . substr($body, 0, 500);
+
+        $hint = match ($errCode) {
+            'invalid_api_key'     => 'Key existiert nicht / widerrufen / Tippfehler. Neuen Key auf platform.openai.com/api-keys erstellen.',
+            'insufficient_quota'  => 'Account hat kein Guthaben → platform.openai.com/account/billing/overview → Add Credits.',
+            'rate_limit_exceeded' => 'Aktuelles Rate-Limit überschritten — kurz warten und retesten.',
+            default               => 'Wenn Key OK aussieht: Key-Permissions prüfen — restricted Keys brauchen explizit "Model capabilities → Audio".',
+        };
+        $lines[] = '→ Hinweis: ' . $hint;
+
+        set_transient('newss_whisper_test', ['type' => 'error', 'lines' => $lines], 120);
+        self::redirect();
+    }
+
+    private static function redirect(): void
+    {
+        wp_safe_redirect(admin_url('admin.php?page=' . self::PAGE_SLUG));
+        exit;
     }
 
     public static function addMenu(): void
@@ -321,7 +436,29 @@ final class Settings
                     </tr>
                     <tr>
                         <th scope="row"><label for="newss_whisper_api_key">OpenAI API-Key (für Whisper)</label></th>
-                        <td><input type="password" id="newss_whisper_api_key" name="newss_whisper_api_key" value="<?php echo esc_attr($whKey); ?>" class="regular-text" autocomplete="off"></td>
+                        <td>
+                            <input type="password" id="newss_whisper_api_key" name="newss_whisper_api_key" value="<?php echo esc_attr($whKey); ?>" class="regular-text" autocomplete="off">
+                            <?php
+                            $whisperNotice = get_transient('newss_whisper_test');
+                            if ($whisperNotice) {
+                                delete_transient('newss_whisper_test');
+                            }
+                            ?>
+                            <div style="margin-top:8px">
+                                <button type="button" class="button" onclick="(function(){var snap=document.getElementById('newss-whisper-key-snapshot');var inp=document.getElementById('newss_whisper_api_key');snap.value=inp.value;document.getElementById('newss-test-whisper-form').submit();})();">Key testen</button>
+                                <span class="description">— Test-Call gegen <code>/v1/models</code>. Nimmt den aktuellen Wert im Feld oben (auch ohne vorher zu speichern).</span>
+                            </div>
+                            <?php if (is_array($whisperNotice) && !empty($whisperNotice['lines'])): ?>
+                                <div class="notice notice-<?php echo esc_attr((string) $whisperNotice['type']); ?> inline" style="margin-top:10px;padding:10px 14px">
+                                    <p style="margin:0 0 6px 0"><strong>Whisper-Test-Ergebnis:</strong></p>
+                                    <pre style="margin:0;background:#f6f7f7;padding:8px;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all"><?php
+                                        foreach ((array) $whisperNotice['lines'] as $line) {
+                                            echo esc_html((string) $line) . "\n";
+                                        }
+                                    ?></pre>
+                                </div>
+                            <?php endif; ?>
+                        </td>
                     </tr>
                 </table>
 
@@ -401,6 +538,12 @@ final class Settings
                 </table>
 
                 <?php submit_button(); ?>
+            </form>
+
+            <form id="newss-test-whisper-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:none">
+                <input type="hidden" name="action" value="newss_test_whisper">
+                <input type="hidden" name="whisper_key" value="" id="newss-whisper-key-snapshot">
+                <?php wp_nonce_field('newss_test_whisper'); ?>
             </form>
         </div>
         <?php
