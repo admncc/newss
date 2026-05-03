@@ -110,6 +110,7 @@ final class ChannelResolver
             'user-agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
             'headers'    => [
                 'Accept-Language' => 'de,en;q=0.8',
+                'Cookie'          => 'CONSENT=YES+cb.20210328-17-p0.de+FX+1; SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmRlIAEaBgiA_LyaBg',
             ],
         ]);
         if (is_wp_error($resp) || (int) wp_remote_retrieve_response_code($resp) !== 200) {
