@@ -8,15 +8,21 @@ final class Worker
 {
     public const HOOK_PROCESS = 'newss_process_video';
 
+    private static int $currentActionId = 0;
+
     public static function register(): void
     {
         add_action(self::HOOK_PROCESS, [self::class, 'processVideo'], 10, 1);
+        add_action('action_scheduler_before_execute', static function ($actionId): void {
+            self::$currentActionId = (int) $actionId;
+        });
     }
 
     public static function processVideo(array $payload): void
     {
         $videoId = (string) ($payload['video_id'] ?? '');
         if ($videoId === '') {
+            self::skip('empty payload', '');
             return;
         }
 
@@ -30,12 +36,13 @@ final class Worker
             'no_found_rows'  => true,
         ]);
         if ($existing) {
+            self::skip('post already exists', $videoId);
             return;
         }
 
         $transcript = (new Transcript())->fetch($videoId);
         if ($transcript === '' || mb_strlen($transcript) < 50) {
-            error_log("[newss] transcript too short / missing for {$videoId}; skipping");
+            self::skip('transcript missing/too-short (' . mb_strlen($transcript) . ' chars)', $videoId);
             return;
         }
 
@@ -47,19 +54,15 @@ final class Worker
         $blockedHits = self::blockedTopicHits($rewrite);
         if ($blockedHits !== []) {
             $action = (string) get_option('newss_blocked_action', 'skip');
-            error_log(sprintf(
-                '[newss] sensitive topics for %s: [%s] -> action=%s',
-                $videoId,
-                implode(',', $blockedHits),
-                $action
-            ));
             if ($action === 'skip') {
+                self::skip('sensitive topics: ' . implode(',', $blockedHits), $videoId);
                 return;
             }
             $rewrite['_force_draft'] = 1;
         }
 
-        (new PostBuilder())->createPost($rewrite, $payload);
+        $postId = (new PostBuilder())->createPost($rewrite, $payload);
+        self::log('posted post #' . $postId);
     }
 
     private static function blockedTopicHits(array $rewrite): array
@@ -70,5 +73,24 @@ final class Worker
             return [];
         }
         return array_values(array_intersect($tags, $blocked));
+    }
+
+    private static function skip(string $reason, string $videoId): void
+    {
+        if ($videoId !== '') {
+            error_log("[newss] skip {$videoId}: {$reason}");
+        }
+        self::log('SKIP: ' . $reason);
+    }
+
+    private static function log(string $message): void
+    {
+        if (self::$currentActionId > 0 && class_exists('\\ActionScheduler')) {
+            try {
+                \ActionScheduler::logger()->log(self::$currentActionId, '[newss] ' . $message);
+            } catch (\Throwable) {
+                // logger may not be ready in some contexts
+            }
+        }
     }
 }

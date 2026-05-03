@@ -6,6 +6,8 @@ namespace Newss;
 
 final class Status
 {
+    private const PER_PAGE = 50;
+
     public static function renderChannelPoll(): void
     {
         $last = get_option('newss_last_poll', null);
@@ -48,37 +50,56 @@ final class Status
 
     public static function renderPipeline(): void
     {
-        if (!function_exists('as_get_scheduled_actions')) {
+        if (!function_exists('as_get_scheduled_actions') || !class_exists('\\ActionScheduler')) {
             return;
         }
 
         $statusCounts = self::statusCounts();
-        $rows = self::collectActions(40);
+
+        $page    = max(1, (int) ($_GET['newss_page'] ?? 1));
+        $perPage = self::PER_PAGE;
+
+        $since = new \DateTime('24 hours ago', new \DateTimeZone('UTC'));
+        $total = self::countSince($since);
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        if ($page > $totalPages) {
+            $page = $totalPages;
+        }
+        $offset = ($page - 1) * $perPage;
+        $rows = self::fetchSince($since, $perPage, $offset);
+
+        $statsLabels = [
+            'pending'     => 'Pending',
+            'in-progress' => 'Läuft',
+            'complete'    => 'Complete (gesamt)',
+            'failed'      => 'Failed',
+        ];
         ?>
-        <h2>Job-Pipeline</h2>
-        <p class="description" style="max-width:880px;margin-bottom:8px">
-            <?php foreach ($statusCounts as $status => $count): ?>
-                <span style="margin-right:14px"><strong><?php echo esc_html($status); ?>:</strong> <?php echo (int) $count; ?></span>
+        <h2>Job-Pipeline (letzte 24h)</h2>
+        <p class="description" style="max-width:1180px;margin-bottom:8px">
+            <?php foreach ($statusCounts as $key => $count): ?>
+                <span style="margin-right:14px"><strong><?php echo esc_html($statsLabels[$key] ?? $key); ?>:</strong> <?php echo (int) $count; ?></span>
             <?php endforeach; ?>
+            <span style="margin-left:auto;color:#888;font-size:11px">— „complete" enthält <em>posted</em>, <em>skipped</em> und <em>orphan</em>; siehe Status-Spalte unten</span>
         </p>
         <?php if (!$rows): ?>
-            <p><em>Keine Jobs in der Pipeline.</em></p>
+            <p><em>Keine Jobs in der letzten 24 Stunden.</em></p>
         <?php else: ?>
-            <table class="widefat striped" style="max-width:1180px">
+            <table class="widefat striped" style="max-width:1280px">
                 <thead>
                     <tr>
                         <th style="width:90px">Status</th>
                         <th style="width:130px">Geplant für</th>
                         <th>Video</th>
                         <th style="width:140px">Channel</th>
-                        <th style="width:140px">Artikel</th>
+                        <th style="width:160px">Artikel / Grund</th>
                         <th>Letzter Log-Eintrag</th>
                     </tr>
                 </thead>
                 <tbody>
                 <?php foreach ($rows as $r): ?>
                     <tr>
-                        <td><?php echo self::statusBadge($r['status']); ?></td>
+                        <td><?php echo self::statusBadge($r['effective']); ?></td>
                         <td style="font-size:11px"><?php echo esc_html($r['scheduled']); ?></td>
                         <td>
                             <strong><?php echo esc_html($r['title']); ?></strong><br>
@@ -91,20 +112,45 @@ final class Status
                                 <?php if (!empty($r['edit_url'])): ?>
                                     <br><a href="<?php echo esc_url($r['edit_url']); ?>">→ Bearbeiten</a>
                                 <?php endif; ?>
+                            <?php elseif ($r['effective'] === 'skipped'): ?>
+                                <span style="color:#7a5b00"><?php echo esc_html($r['reason'] ?: '—'); ?></span>
+                            <?php elseif ($r['effective'] === 'failed'): ?>
+                                <span style="color:#c00">Exception</span>
+                            <?php elseif ($r['effective'] === 'orphan'): ?>
+                                <span style="color:#c66">orphan: complete ohne Post & ohne Skip-Log</span>
                             <?php else: ?>
                                 —
                             <?php endif; ?>
                         </td>
-                        <td style="font-size:11px;<?php echo $r['status'] === 'failed' ? 'color:#c00' : 'color:#666'; ?>">
+                        <td style="font-size:11px;<?php echo in_array($r['effective'], ['failed', 'orphan'], true) ? 'color:#c00' : 'color:#666'; ?>">
                             <?php echo esc_html($r['last_log']); ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
             </table>
+            <?php echo self::renderPagination($page, $totalPages, $total); ?>
         <?php endif; ?>
         <hr style="margin:32px 0">
         <?php
+    }
+
+    private static function renderPagination(int $page, int $totalPages, int $total): string
+    {
+        if ($totalPages <= 1) {
+            return '<p class="description" style="margin-top:8px">' . (int) $total . ' Jobs in letzter 24h.</p>';
+        }
+        $base = admin_url('admin.php?page=newss-settings');
+        $out = '<p style="margin-top:12px;display:flex;align-items:center;gap:8px">';
+        if ($page > 1) {
+            $out .= sprintf('<a class="button" href="%s">‹ Zurück</a>', esc_url(add_query_arg('newss_page', $page - 1, $base)));
+        }
+        $out .= sprintf('<span class="description">Seite %d / %d &nbsp;·&nbsp; %d Jobs gesamt (%d pro Seite)</span>', $page, $totalPages, $total, self::PER_PAGE);
+        if ($page < $totalPages) {
+            $out .= sprintf('<a class="button" href="%s">Weiter ›</a>', esc_url(add_query_arg('newss_page', $page + 1, $base)));
+        }
+        $out .= '</p>';
+        return $out;
     }
 
     private static function statusCounts(): array
@@ -112,13 +158,7 @@ final class Status
         $statuses = ['pending', 'in-progress', 'complete', 'failed'];
         $out = [];
         foreach ($statuses as $s) {
-            $count = as_get_scheduled_actions([
-                'hook'     => Worker::HOOK_PROCESS,
-                'group'    => 'newss',
-                'status'   => $s,
-                'per_page' => 1,
-            ], 'ids');
-            $out[$s] = is_array($count) ? self::countActions($s) : 0;
+            $out[$s] = self::countActions($s);
         }
         return $out;
     }
@@ -134,41 +174,49 @@ final class Status
                 'group'  => 'newss',
                 'status' => $status,
             ], 'count');
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             return 0;
         }
     }
 
-    private static function collectActions(int $limit): array
+    private static function countSince(\DateTime $since): int
     {
-        $rows = [];
-
-        foreach (['pending', 'in-progress'] as $status) {
-            foreach (self::fetch($status, 15, 'ASC') as $r) {
-                $rows[] = $r;
-            }
+        try {
+            return (int) \ActionScheduler::store()->query_actions([
+                'hook'             => Worker::HOOK_PROCESS,
+                'group'            => 'newss',
+                'modified'         => $since,
+                'modified_compare' => '>=',
+            ], 'count');
+        } catch (\Throwable) {
+            return 0;
         }
-        foreach (['failed', 'complete'] as $status) {
-            foreach (self::fetch($status, 12, 'DESC') as $r) {
-                $rows[] = $r;
-            }
-        }
-        return array_slice($rows, 0, $limit);
     }
 
-    private static function fetch(string $status, int $perPage, string $order): array
+    private static function fetchSince(\DateTime $since, int $perPage, int $offset): array
     {
-        $ids = as_get_scheduled_actions([
-            'hook'     => Worker::HOOK_PROCESS,
-            'group'    => 'newss',
-            'status'   => $status,
-            'per_page' => $perPage,
-            'order'    => $order,
-            'orderby'  => 'date',
-        ], 'ids');
+        try {
+            $ids = as_get_scheduled_actions([
+                'hook'             => Worker::HOOK_PROCESS,
+                'group'            => 'newss',
+                'modified'         => $since,
+                'modified_compare' => '>=',
+                'per_page'         => $perPage,
+                'offset'           => $offset,
+                'order'            => 'DESC',
+                'orderby'          => 'date',
+            ], 'ids');
+        } catch (\Throwable) {
+            return [];
+        }
         if (!is_array($ids) || $ids === []) {
             return [];
         }
+        return self::buildRows($ids);
+    }
+
+    private static function buildRows(array $ids): array
+    {
         $store  = \ActionScheduler::store();
         $logger = \ActionScheduler::logger();
         $out = [];
@@ -178,9 +226,14 @@ final class Status
             } catch (\Throwable) {
                 continue;
             }
-            $args = $action ? $action->get_args() : [];
+            if (!$action) {
+                continue;
+            }
+
+            $status = (string) $store->get_status($actionId);
+            $args = $action->get_args();
             $payload = $args[0] ?? [];
-            $schedule = $action ? $action->get_schedule() : null;
+            $schedule = $action->get_schedule();
             $next = $schedule && method_exists($schedule, 'get_date') ? $schedule->get_date() : null;
             $logs = $logger->get_logs($actionId);
             $lastLog = $logs ? end($logs) : null;
@@ -203,8 +256,30 @@ final class Status
                 }
             }
 
+            $effective = $status;
+            $reason = '';
+            if ($status === 'complete') {
+                if ($postUrl !== '') {
+                    $effective = 'posted';
+                } else {
+                    foreach (array_reverse($logs ?: []) as $log) {
+                        $msg = $log->get_message();
+                        if (preg_match('/\[newss\]\s+SKIP:\s*(.+)/', $msg, $m)) {
+                            $effective = 'skipped';
+                            $reason = trim($m[1]);
+                            break;
+                        }
+                    }
+                    if ($effective === 'complete') {
+                        $effective = 'orphan';
+                    }
+                }
+            }
+
             $out[] = [
                 'status'     => $status,
+                'effective'  => $effective,
+                'reason'     => $reason,
                 'video_id'   => $videoId,
                 'title'      => self::shorten((string) ($payload['video_title'] ?? ''), 80),
                 'channel'    => (string) ($payload['channel_name'] ?? ''),
@@ -220,12 +295,25 @@ final class Status
     private static function statusBadge(string $status): string
     {
         return match ($status) {
-            'pending'     => '<span style="display:inline-block;padding:2px 8px;background:#fffbe6;color:#7a5b00;border-radius:3px;font-size:11px">pending</span>',
-            'in-progress' => '<span style="display:inline-block;padding:2px 8px;background:#e6f4ff;color:#003a80;border-radius:3px;font-size:11px">in-progress</span>',
-            'complete'    => '<span style="display:inline-block;padding:2px 8px;background:#eaf7e6;color:#0a5a00;border-radius:3px;font-size:11px">complete</span>',
-            'failed'      => '<span style="display:inline-block;padding:2px 8px;background:#ffe6e6;color:#7a0000;border-radius:3px;font-size:11px">failed</span>',
+            'pending'     => self::badge('pending', '#fffbe6', '#7a5b00'),
+            'in-progress' => self::badge('läuft',   '#e6f4ff', '#003a80'),
+            'posted'      => self::badge('posted',  '#eaf7e6', '#0a5a00'),
+            'skipped'     => self::badge('skipped', '#fff4d6', '#7a5b00'),
+            'orphan'      => self::badge('orphan',  '#ffe6cc', '#7a4000'),
+            'complete'    => self::badge('complete','#eaf7e6', '#0a5a00'),
+            'failed'      => self::badge('failed',  '#ffe6e6', '#7a0000'),
             default       => esc_html($status),
         };
+    }
+
+    private static function badge(string $label, string $bg, string $color): string
+    {
+        return sprintf(
+            '<span style="display:inline-block;padding:2px 8px;background:%s;color:%s;border-radius:3px;font-size:11px;font-weight:500">%s</span>',
+            esc_attr($bg),
+            esc_attr($color),
+            esc_html($label)
+        );
     }
 
     private static function shorten(string $s, int $max): string
