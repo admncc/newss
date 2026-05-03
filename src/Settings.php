@@ -288,7 +288,7 @@ final class Settings
                 <tbody>
                 <tr><th>yt-dlp</th><td><?php echo $ytDlpFound ? '<span style="color:#0a7">gefunden</span>' : '<span style="color:#c00">nicht gefunden</span>'; ?> (<code><?php echo esc_html($ytdlp); ?></code>)</td></tr>
                 <tr><th>ffmpeg</th><td><?php echo $ffmpegFound ? '<span style="color:#0a7">gefunden</span>' : '<span style="color:#c00">nicht gefunden</span>'; ?></td></tr>
-                <tr><th>Nächster Lauf (stündlich)</th><td><?php echo $nextRun ? esc_html(self::formatTime($nextRun)) : '—'; ?></td></tr>
+                <tr><th>Nächster Lauf (alle 8h, 3× täglich)</th><td><?php echo $nextRun ? esc_html(self::formatTime($nextRun)) : '—'; ?></td></tr>
                 <tr><th>Letztes Polling</th><td><?php
                     if (is_array($lastPoll)) {
                         $s = $lastPoll['stats'];
@@ -309,7 +309,7 @@ final class Settings
 
             <p style="background:#fff8e1;border-left:4px solid #ffb900;padding:8px 12px;max-width:780px">
                 <strong>Empfehlung:</strong> Trag auf dem Server diesen System-Cron ein und deaktiviere WP-Cron in <code>wp-config.php</code>:<br>
-                <code>0 */6 * * * curl -s <?php echo esc_html(home_url('/wp-cron.php?doing_wp_cron')); ?> &gt; /dev/null</code><br>
+                <code>0 */8 * * * curl -s <?php echo esc_html(home_url('/wp-cron.php?doing_wp_cron')); ?> &gt; /dev/null</code><br>
                 <code>define('DISABLE_WP_CRON', true);</code>
             </p>
 
