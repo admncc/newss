@@ -164,6 +164,10 @@ final class Settings
                 <code>define('DISABLE_WP_CRON', true);</code>
             </p>
 
+            <?php Status::renderChannelPoll(); ?>
+
+            <?php Status::renderPipeline(); ?>
+
             <?php Updater::renderSection(); ?>
 
             <?php Channels::renderSection(); ?>

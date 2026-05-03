@@ -14,23 +14,36 @@ final class RssPoller
         }
 
         $stats = ['channels' => 0, 'new' => 0, 'errors' => 0];
+        $perChannel = [];
 
         foreach ($channels as $channel) {
             if (empty($channel['enabled']) || empty($channel['id'])) {
                 continue;
             }
             $stats['channels']++;
+            $entry = [
+                'id'    => (string) $channel['id'],
+                'name'  => (string) ($channel['name'] ?? $channel['id']),
+                'count' => 0,
+                'ok'    => false,
+                'error' => '',
+            ];
             try {
-                $stats['new'] += self::pollChannel($channel);
+                $entry['count'] = self::pollChannel($channel);
+                $entry['ok']    = true;
+                $stats['new'] += $entry['count'];
             } catch (\Throwable $e) {
+                $entry['error'] = $e->getMessage();
                 $stats['errors']++;
-                error_log('[newss] poll error for ' . ($channel['id'] ?? '?') . ': ' . $e->getMessage());
+                error_log('[newss] poll error for ' . $entry['id'] . ': ' . $e->getMessage());
             }
+            $perChannel[] = $entry;
         }
 
         update_option('newss_last_poll', [
-            'time'  => time(),
-            'stats' => $stats,
+            'time'     => time(),
+            'stats'    => $stats,
+            'channels' => $perChannel,
         ], false);
     }
 
