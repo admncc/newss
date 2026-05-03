@@ -105,7 +105,7 @@ final class ChannelResolver
 
     private function httpGet(string $url): string
     {
-        $resp = wp_remote_get($url, [
+        $resp = Http::get($url, [
             'timeout'    => 20,
             'user-agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
             'headers'    => [

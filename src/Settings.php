@@ -46,6 +46,7 @@ final class Settings
             'newss_anthropic_temperature'  => [self::class, 'sanitizeTemperature'],
             'newss_system_prompt'          => [self::class, 'sanitizeMultiline'],
             'newss_user_prompt_template'   => [self::class, 'sanitizeMultiline'],
+            'newss_youtube_proxy'          => [self::class, 'sanitizeMultiline'],
             'newss_supadata_api_key'       => 'sanitize_text_field',
             'newss_ytdlp_path'             => 'sanitize_text_field',
             'newss_whisper_enabled'        => 'absint',
@@ -106,6 +107,7 @@ final class Settings
         $temperature = (float)  get_option('newss_anthropic_temperature', 1.0);
         $systemPrompt= (string) get_option('newss_system_prompt', Anthropic::defaultSystemPrompt());
         $userTpl     = (string) get_option('newss_user_prompt_template', Anthropic::defaultUserTemplate());
+        $youtubeProxy = (string) get_option('newss_youtube_proxy', '');
         $supadataKey = (string) get_option('newss_supadata_api_key', '');
         $ytdlp       = (string) get_option('newss_ytdlp_path', 'yt-dlp');
         $whEnabled   = (int)    get_option('newss_whisper_enabled', 0);
@@ -202,6 +204,23 @@ final class Settings
                         <td>
                             <textarea id="newss_user_prompt_template" name="newss_user_prompt_template" rows="6" class="large-text code"><?php echo esc_textarea($userTpl); ?></textarea>
                             <p class="description">Platzhalter: <code>{title}</code>, <code>{channel}</code>, <code>{published_at}</code>, <code>{transcript}</code></p>
+                        </td>
+                    </tr>
+                </table>
+
+                <h2>YouTube-Zugriff (Proxy-Rotation)</h2>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><label for="newss_youtube_proxy">Proxy-Liste</label></th>
+                        <td>
+                            <textarea id="newss_youtube_proxy" name="newss_youtube_proxy" rows="6" class="large-text code" placeholder="host:port:user:pass&#10;http://user:pass@host:port&#10;socks5://host:port&#10;# Eine Zeile pro Proxy. Bei mehreren wird per Request randomisiert rotiert."><?php echo esc_textarea($youtubeProxy); ?></textarea>
+                            <p class="description">
+                                Eine Zeile pro Proxy. Akzeptierte Formate:<br>
+                                <code>host:port:user:pass</code> &nbsp;|&nbsp; <code>http://user:pass@host:port</code> &nbsp;|&nbsp; <code>socks5://host:port</code><br>
+                                Bei mehreren Einträgen wird pro Request randomisiert einer gewählt.
+                                Wird nur für YouTube-RSS und Channel-Resolver genutzt — Anthropic und Supadata gehen direkt.
+                                Leer lassen = kein Proxy.
+                            </p>
                         </td>
                     </tr>
                 </table>

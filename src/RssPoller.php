@@ -41,7 +41,7 @@ final class RssPoller
             rawurlencode((string) $channel['id'])
         );
 
-        $response = wp_remote_get($url, [
+        $response = Http::get($url, [
             'timeout'    => 30,
             'user-agent' => 'NewssAutopost/1.0 (+WordPress)',
         ]);
