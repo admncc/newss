@@ -34,7 +34,7 @@ final class Worker
         }
 
         $transcript = (new Transcript())->fetch($videoId);
-        if ($transcript === '' || mb_strlen($transcript) < 200) {
+        if ($transcript === '' || mb_strlen($transcript) < 50) {
             error_log("[newss] transcript too short / missing for {$videoId}; skipping");
             return;
         }
