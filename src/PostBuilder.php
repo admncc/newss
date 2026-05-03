@@ -85,7 +85,12 @@ final class PostBuilder
             }
         }
 
-        $postId = wp_insert_post($postArr, true);
+        kses_remove_filters();
+        try {
+            $postId = wp_insert_post($postArr, true);
+        } finally {
+            kses_init_filters();
+        }
         if (is_wp_error($postId)) {
             throw new \RuntimeException('wp_insert_post failed: ' . $postId->get_error_message());
         }
