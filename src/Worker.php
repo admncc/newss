@@ -72,7 +72,7 @@ final class Worker
     {
         $existing = get_posts([
             'post_type'              => 'post',
-            'post_status'            => 'any',
+            'post_status'            => ['publish', 'draft', 'private', 'pending', 'future', 'trash'],
             'meta_key'               => '_newss_video_id',
             'meta_value'             => $videoId,
             'fields'                 => 'ids',

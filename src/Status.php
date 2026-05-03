@@ -372,7 +372,7 @@ final class Status
 
     /**
      * @param string[] $videoIds
-     * @return array<string,int> map video_id -> post_id
+     * @return array<string,int> map video_id -> post_id (only "real" posts, no trash/auto-draft)
      */
     private static function lookupPostsByVideoIds(array $videoIds): array
     {
@@ -382,7 +382,13 @@ final class Status
         global $wpdb;
         $placeholders = implode(',', array_fill(0, count($videoIds), '%s'));
         $sql = $wpdb->prepare(
-            "SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value IN ($placeholders)",
+            "SELECT pm.post_id, pm.meta_value
+             FROM {$wpdb->postmeta} pm
+             INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+             WHERE pm.meta_key = %s
+               AND pm.meta_value IN ($placeholders)
+               AND p.post_status IN ('publish','draft','private','pending','future')
+               AND p.post_type = 'post'",
             array_merge(['_newss_video_id'], $videoIds)
         );
         $rows = $wpdb->get_results($sql, ARRAY_A) ?: [];
