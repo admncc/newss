@@ -231,10 +231,10 @@ final class Status
     {
         try {
             return (int) \ActionScheduler::store()->query_actions([
-                'hook'             => Worker::HOOK_PROCESS,
-                'group'            => 'newss',
-                'modified'         => $since,
-                'modified_compare' => '>=',
+                'hook'         => Worker::HOOK_PROCESS,
+                'group'        => 'newss',
+                'date'         => $since,
+                'date_compare' => '>=',
             ], 'count');
         } catch (\Throwable) {
             return 0;
@@ -245,14 +245,14 @@ final class Status
     {
         try {
             $ids = as_get_scheduled_actions([
-                'hook'             => Worker::HOOK_PROCESS,
-                'group'            => 'newss',
-                'modified'         => $since,
-                'modified_compare' => '>=',
-                'per_page'         => $perPage,
-                'offset'           => $offset,
-                'order'            => 'DESC',
-                'orderby'          => 'date',
+                'hook'         => Worker::HOOK_PROCESS,
+                'group'        => 'newss',
+                'date'         => $since,
+                'date_compare' => '>=',
+                'per_page'     => $perPage,
+                'offset'       => $offset,
+                'order'        => 'DESC',
+                'orderby'      => 'date',
             ], 'ids');
         } catch (\Throwable) {
             return [];
