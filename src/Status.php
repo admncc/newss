@@ -221,7 +221,9 @@ final class Status
     {
         $store  = \ActionScheduler::store();
         $logger = \ActionScheduler::logger();
-        $out = [];
+
+        $rawRows = [];
+        $videoIdsToLookup = [];
         foreach ($ids as $actionId) {
             try {
                 $action = $store->fetch_action($actionId);
@@ -232,13 +234,38 @@ final class Status
                 continue;
             }
 
-            $status = (string) $store->get_status($actionId);
-            $args = $action->get_args();
-            $payload = $args[0] ?? [];
+            $status   = (string) $store->get_status($actionId);
+            $args     = $action->get_args();
+            $payload  = $args[0] ?? [];
             $schedule = $action->get_schedule();
-            $next = $schedule && method_exists($schedule, 'get_date') ? $schedule->get_date() : null;
-            $logs = $logger->get_logs($actionId);
-            $lastLog = $logs ? end($logs) : null;
+            $next     = $schedule && method_exists($schedule, 'get_date') ? $schedule->get_date() : null;
+            $logs     = $logger->get_logs($actionId);
+
+            $videoId = (string) ($payload['video_id'] ?? '');
+            if ($status === 'complete' && $videoId !== '') {
+                $videoIdsToLookup[] = $videoId;
+            }
+
+            $rawRows[] = [
+                'status'   => $status,
+                'payload'  => $payload,
+                'next'     => $next,
+                'logs'     => $logs,
+                'video_id' => $videoId,
+            ];
+        }
+
+        $postMap = self::lookupPostsByVideoIds(array_values(array_unique($videoIdsToLookup)));
+
+        $out = [];
+        foreach ($rawRows as $r) {
+            $status   = $r['status'];
+            $payload  = $r['payload'];
+            $next     = $r['next'];
+            $logs     = $r['logs'];
+            $videoId  = $r['video_id'];
+            $lastLog  = $logs ? end($logs) : null;
+
             $updated = '';
             if ($lastLog) {
                 try {
@@ -251,22 +278,12 @@ final class Status
                 }
             }
 
-            $videoId = (string) ($payload['video_id'] ?? '');
             $postUrl = '';
             $editUrl = '';
-            if ($status === 'complete' && $videoId !== '') {
-                $posts = get_posts([
-                    'meta_key'       => '_newss_video_id',
-                    'meta_value'     => $videoId,
-                    'post_status'    => 'any',
-                    'posts_per_page' => 1,
-                    'fields'         => 'ids',
-                    'no_found_rows'  => true,
-                ]);
-                if ($posts) {
-                    $postUrl = (string) get_permalink((int) $posts[0]);
-                    $editUrl = (string) get_edit_post_link((int) $posts[0], '');
-                }
+            if ($status === 'complete' && isset($postMap[$videoId])) {
+                $postId  = (int) $postMap[$videoId];
+                $postUrl = (string) get_permalink($postId);
+                $editUrl = (string) get_edit_post_link($postId, '');
             }
 
             $effective = $status;
@@ -304,6 +321,32 @@ final class Status
             ];
         }
         return $out;
+    }
+
+    /**
+     * @param string[] $videoIds
+     * @return array<string,int> map video_id -> post_id
+     */
+    private static function lookupPostsByVideoIds(array $videoIds): array
+    {
+        if ($videoIds === []) {
+            return [];
+        }
+        global $wpdb;
+        $placeholders = implode(',', array_fill(0, count($videoIds), '%s'));
+        $sql = $wpdb->prepare(
+            "SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value IN ($placeholders)",
+            array_merge(['_newss_video_id'], $videoIds)
+        );
+        $rows = $wpdb->get_results($sql, ARRAY_A) ?: [];
+        $map = [];
+        foreach ($rows as $row) {
+            $vid = (string) ($row['meta_value'] ?? '');
+            if ($vid !== '' && !isset($map[$vid])) {
+                $map[$vid] = (int) $row['post_id'];
+            }
+        }
+        return $map;
     }
 
     private static function statusBadge(string $status): string
