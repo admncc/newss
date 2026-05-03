@@ -25,7 +25,9 @@ final class Http
 
         $filter = static function ($handle) use ($proxy) {
             curl_setopt($handle, CURLOPT_PROXY, $proxy);
-            curl_setopt($handle, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
+            curl_setopt($handle, CURLOPT_PROXYAUTH, CURLAUTH_BASIC);
+            curl_setopt($handle, CURLOPT_HTTPPROXYTUNNEL, true);
+            curl_setopt($handle, CURLOPT_CONNECTTIMEOUT, 15);
             return $handle;
         };
         add_action('http_api_curl', $filter);
