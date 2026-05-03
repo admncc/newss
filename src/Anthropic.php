@@ -159,10 +159,15 @@ final class Anthropic
             'Innenpolitik',
             'Europa',
             'Wirtschaft & Finanzen',
+            'Arbeit & Beruf',
+            'Verbraucher & Lifestyle',
+            'Verkehr & Mobilität',
             'Gesellschaft',
             'Klima & Umwelt',
+            'Gesundheit',
+            'Justiz & Recht',
             'Kultur & Medien',
-            'Technologie',
+            'Technologie & Wissenschaft',
             'Sport',
         ]);
     }
