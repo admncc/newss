@@ -73,6 +73,7 @@ final class RssPoller
             if (self::videoAlreadyHandled($video['id'])) {
                 continue;
             }
+            set_transient(Worker::pendingTransientKey($video['id']), 1, DAY_IN_SECONDS);
             \as_enqueue_async_action(
                 Worker::HOOK_PROCESS,
                 [[
@@ -122,37 +123,9 @@ final class RssPoller
 
     private static function videoAlreadyHandled(string $videoId): bool
     {
-        $existing = get_posts([
-            'post_type'      => 'post',
-            'post_status'    => 'any',
-            'meta_key'       => '_newss_video_id',
-            'meta_value'     => $videoId,
-            'fields'         => 'ids',
-            'posts_per_page' => 1,
-            'no_found_rows'  => true,
-        ]);
-        if ($existing) {
+        if (get_transient(Worker::pendingTransientKey($videoId))) {
             return true;
         }
-
-        $pending = \as_has_scheduled_action(Worker::HOOK_PROCESS, null, 'newss');
-        if (!$pending) {
-            return false;
-        }
-        $matches = \as_get_scheduled_actions([
-            'hook'     => Worker::HOOK_PROCESS,
-            'group'    => 'newss',
-            'status'   => [\ActionScheduler_Store::STATUS_PENDING, \ActionScheduler_Store::STATUS_RUNNING],
-            'per_page' => 200,
-        ], 'ids');
-        foreach ($matches as $actionId) {
-            $action = \ActionScheduler::store()->fetch_action($actionId);
-            $args   = $action ? $action->get_args() : [];
-            $payload = $args[0] ?? null;
-            if (is_array($payload) && ($payload['video_id'] ?? '') === $videoId) {
-                return true;
-            }
-        }
-        return false;
+        return Worker::videoAlreadyHasPost($videoId);
     }
 }

@@ -6,7 +6,7 @@ namespace Newss;
 
 final class PostBuilder
 {
-    public function createPost(array $rewrite, array $payload): int
+    public function createPost(array $rewrite, array $payload, bool $forceDraft = false): int
     {
         $videoId   = (string) ($payload['video_id'] ?? '');
         $channel   = (string) ($payload['channel_name'] ?? '');
@@ -14,7 +14,6 @@ final class PostBuilder
         $published = (string) ($payload['published'] ?? '');
 
         $killSwitch    = (bool) get_option('newss_kill_switch_drafts', false);
-        $forceDraft    = !empty($rewrite['_force_draft']);
         $defaultStatus = (string) get_option('newss_default_status', 'publish');
         $status = ($killSwitch || $forceDraft || $defaultStatus === 'draft') ? 'draft' : 'publish';
 

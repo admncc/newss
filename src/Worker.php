@@ -26,43 +26,68 @@ final class Worker
             return;
         }
 
-        $existing = get_posts([
-            'post_type'      => 'post',
-            'post_status'    => 'any',
-            'meta_key'       => '_newss_video_id',
-            'meta_value'     => $videoId,
-            'fields'         => 'ids',
-            'posts_per_page' => 1,
-            'no_found_rows'  => true,
-        ]);
-        if ($existing) {
+        if (self::videoAlreadyHasPost($videoId)) {
             self::skip('post already exists', $videoId);
             return;
         }
 
-        $transcript = (new Transcript())->fetch($videoId);
-        if ($transcript === '' || mb_strlen($transcript) < 50) {
-            self::skip('transcript missing/too-short (' . mb_strlen($transcript) . ' chars)', $videoId);
+        $lockKey = 'newss_lock_' . $videoId;
+        if (!add_option($lockKey, time(), '', 'no')) {
+            self::skip('parallel worker already processing', $videoId);
             return;
         }
 
-        $rewrite = (new Anthropic())->rewrite($transcript, $payload);
-        if (!$rewrite) {
-            throw new \RuntimeException('Claude rewrite failed; will retry');
-        }
-
-        $blockedHits = self::blockedTopicHits($rewrite);
-        if ($blockedHits !== []) {
-            $action = (string) get_option('newss_blocked_action', 'skip');
-            if ($action === 'skip') {
-                self::skip('sensitive topics: ' . implode(',', $blockedHits), $videoId);
+        try {
+            $transcript = (new Transcript())->fetch($videoId);
+            if ($transcript === '' || mb_strlen($transcript) < 50) {
+                self::skip('transcript missing/too-short (' . mb_strlen($transcript) . ' chars)', $videoId);
                 return;
             }
-            $rewrite['_force_draft'] = 1;
-        }
 
-        $postId = (new PostBuilder())->createPost($rewrite, $payload);
-        self::log('posted post #' . $postId);
+            $rewrite = (new Anthropic())->rewrite($transcript, $payload);
+            if (!$rewrite) {
+                throw new \RuntimeException('Claude rewrite failed; will retry');
+            }
+
+            $blockedHits = self::blockedTopicHits($rewrite);
+            $forceDraft  = false;
+            if ($blockedHits !== []) {
+                $action = (string) get_option('newss_blocked_action', 'skip');
+                if ($action === 'skip') {
+                    self::skip('sensitive topics: ' . implode(',', $blockedHits), $videoId);
+                    return;
+                }
+                $forceDraft = true;
+            }
+
+            $postId = (new PostBuilder())->createPost($rewrite, $payload, $forceDraft);
+            delete_transient(self::pendingTransientKey($videoId));
+            self::log('posted post #' . $postId);
+        } finally {
+            delete_option($lockKey);
+        }
+    }
+
+    public static function videoAlreadyHasPost(string $videoId): bool
+    {
+        $existing = get_posts([
+            'post_type'              => 'post',
+            'post_status'            => 'any',
+            'meta_key'               => '_newss_video_id',
+            'meta_value'             => $videoId,
+            'fields'                 => 'ids',
+            'posts_per_page'         => 1,
+            'no_found_rows'          => true,
+            'cache_results'          => false,
+            'update_post_meta_cache' => false,
+            'update_post_term_cache' => false,
+        ]);
+        return !empty($existing);
+    }
+
+    public static function pendingTransientKey(string $videoId): string
+    {
+        return 'newss_pending_' . $videoId;
     }
 
     private static function blockedTopicHits(array $rewrite): array
