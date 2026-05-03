@@ -89,7 +89,8 @@ final class Status
                 <thead>
                     <tr>
                         <th style="width:90px">Status</th>
-                        <th style="width:130px">Geplant für</th>
+                        <th style="width:120px">Geplant</th>
+                        <th style="width:120px">Letztes Update</th>
                         <th>Video</th>
                         <th style="width:140px">Channel</th>
                         <th style="width:160px">Artikel / Grund</th>
@@ -101,6 +102,7 @@ final class Status
                     <tr>
                         <td><?php echo self::statusBadge($r['effective']); ?></td>
                         <td style="font-size:11px"><?php echo esc_html($r['scheduled']); ?></td>
+                        <td style="font-size:11px"><?php echo esc_html($r['updated'] ?: '—'); ?></td>
                         <td>
                             <strong><?php echo esc_html($r['title']); ?></strong><br>
                             <a href="https://www.youtube.com/watch?v=<?php echo esc_attr($r['video_id']); ?>" target="_blank" rel="noopener" style="font-size:11px"><?php echo esc_html($r['video_id']); ?></a>
@@ -237,6 +239,17 @@ final class Status
             $next = $schedule && method_exists($schedule, 'get_date') ? $schedule->get_date() : null;
             $logs = $logger->get_logs($actionId);
             $lastLog = $logs ? end($logs) : null;
+            $updated = '';
+            if ($lastLog) {
+                try {
+                    $d = $lastLog->get_date();
+                    if ($d) {
+                        $updated = wp_date('Y-m-d H:i', $d->getTimestamp());
+                    }
+                } catch (\Throwable) {
+                    // ignore
+                }
+            }
 
             $videoId = (string) ($payload['video_id'] ?? '');
             $postUrl = '';
@@ -284,6 +297,7 @@ final class Status
                 'title'      => self::shorten((string) ($payload['video_title'] ?? ''), 80),
                 'channel'    => (string) ($payload['channel_name'] ?? ''),
                 'scheduled'  => $next ? $next->format('Y-m-d H:i') : '—',
+                'updated'    => $updated,
                 'last_log'   => $lastLog ? self::shorten($lastLog->get_message(), 200) : '',
                 'post_url'   => $postUrl,
                 'edit_url'   => $editUrl,
