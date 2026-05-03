@@ -6,8 +6,7 @@ namespace Newss;
 
 final class Cron
 {
-    public const HOOK_PERIODIC   = 'newss_cron_periodic';
-    public const SCHEDULE_NAME   = 'newss_6hours';
+    public const HOOK_PERIODIC = 'newss_cron_periodic';
 
     private const LEGACY_HOOKS = [
         'newss_cron_morning',
@@ -18,20 +17,8 @@ final class Cron
 
     public static function register(): void
     {
-        add_filter('cron_schedules', [self::class, 'addSchedule']);
         add_action(self::HOOK_PERIODIC, [RssPoller::class, 'pollAll']);
         add_action('init', [self::class, 'ensureScheduled']);
-    }
-
-    public static function addSchedule(array $schedules): array
-    {
-        if (!isset($schedules[self::SCHEDULE_NAME])) {
-            $schedules[self::SCHEDULE_NAME] = [
-                'interval' => 6 * HOUR_IN_SECONDS,
-                'display'  => 'Alle 6 Stunden (Newss)',
-            ];
-        }
-        return $schedules;
     }
 
     public static function ensureScheduled(): void
@@ -41,17 +28,18 @@ final class Cron
                 wp_clear_scheduled_hook($hook);
             }
         }
-        if (!wp_next_scheduled(self::HOOK_PERIODIC)) {
+
+        $current = wp_get_scheduled_event(self::HOOK_PERIODIC);
+        if ($current && $current->schedule !== 'hourly') {
+            wp_clear_scheduled_hook(self::HOOK_PERIODIC);
+            $current = false;
+        }
+
+        if (!$current) {
             $tz = new \DateTimeZone('Europe/Berlin');
             $now = new \DateTimeImmutable('now', $tz);
-            $hour = (int) $now->format('H');
-            $nextHour = ((int) ceil(($hour + 1) / 6)) * 6;
-            if ($nextHour >= 24) {
-                $target = $now->modify('+1 day')->setTime(0, 0, 0);
-            } else {
-                $target = $now->setTime($nextHour, 0, 0);
-            }
-            wp_schedule_event($target->getTimestamp(), self::SCHEDULE_NAME, self::HOOK_PERIODIC);
+            $target = $now->setTime((int) $now->format('H') + 1, 0, 0);
+            wp_schedule_event($target->getTimestamp(), 'hourly', self::HOOK_PERIODIC);
         }
     }
 

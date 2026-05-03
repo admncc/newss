@@ -139,7 +139,7 @@ final class Settings
                 <tbody>
                 <tr><th>yt-dlp</th><td><?php echo $ytDlpFound ? '<span style="color:#0a7">gefunden</span>' : '<span style="color:#c00">nicht gefunden</span>'; ?> (<code><?php echo esc_html($ytdlp); ?></code>)</td></tr>
                 <tr><th>ffmpeg</th><td><?php echo $ffmpegFound ? '<span style="color:#0a7">gefunden</span>' : '<span style="color:#c00">nicht gefunden</span>'; ?></td></tr>
-                <tr><th>Nächster Lauf (alle 6 Stunden)</th><td><?php echo $nextRun ? esc_html(self::formatTime($nextRun)) : '—'; ?></td></tr>
+                <tr><th>Nächster Lauf (stündlich)</th><td><?php echo $nextRun ? esc_html(self::formatTime($nextRun)) : '—'; ?></td></tr>
                 <tr><th>Letztes Polling</th><td><?php
                     if (is_array($lastPoll)) {
                         $s = $lastPoll['stats'];
