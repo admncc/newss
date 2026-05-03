@@ -120,8 +120,32 @@ final class PostBuilder
             wp_set_post_tags((int) $postId, $tags, false);
         }
 
-        $this->setFeaturedImage((int) $postId, $videoId, $imageAlt !== '' ? $imageAlt : $title);
+        $this->setFeaturedImage(
+            (int) $postId,
+            $videoId,
+            $this->buildAltText($imageAlt, $focusKeyword, $title)
+        );
         return (int) $postId;
+    }
+
+    /**
+     * Stellt sicher dass das Fokus-Keyword im Alt-Text steht.
+     * Falls Claude es vergisst: Keyword wird vorne angefügt.
+     * Max-Länge 125 (gleich wie Tool-Schema-Constraint).
+     */
+    private function buildAltText(string $imageAlt, string $focusKeyword, string $titleFallback): string
+    {
+        $alt = trim($imageAlt);
+        if ($alt === '') {
+            $alt = trim($titleFallback);
+        }
+        if ($focusKeyword !== '' && $alt !== '' && stripos($alt, $focusKeyword) === false) {
+            $alt = rtrim($focusKeyword, ' .,:;') . ' – ' . $alt;
+        }
+        if (mb_strlen($alt) > 125) {
+            $alt = mb_substr($alt, 0, 124) . '…';
+        }
+        return $alt;
     }
 
     private function resolveCategories(int $perChannelFallback, string $aiCategoryName): array
