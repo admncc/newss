@@ -71,7 +71,11 @@ final class Transcript
             );
             $text = implode(' ', $parts);
         }
-        return trim(preg_replace('/\s+/', ' ', $text) ?? '');
+        $text = trim(preg_replace('/\s+/', ' ', $text) ?? '');
+        if ($text === '') {
+            error_log("[newss] supadata 200-empty for {$videoId}: " . substr($body, 0, 200));
+        }
+        return $text;
     }
 
     private function fetchYtDlp(string $videoId): string
@@ -87,8 +91,9 @@ final class Transcript
         $url = 'https://www.youtube.com/watch?v=' . $videoId;
 
         $cmd = sprintf(
-            '%s --skip-download --write-auto-subs --write-subs --sub-langs %s --sub-format %s --convert-subs srt -o %s %s 2>&1',
+            '%s%s --skip-download --write-auto-subs --write-subs --sub-langs %s --sub-format %s --convert-subs srt -o %s %s 2>&1',
             escapeshellarg($bin),
+            self::proxyArg(),
             escapeshellarg('de.*,de,en.*,en'),
             escapeshellarg('vtt/srt/best'),
             escapeshellarg($tmpDir . '/sub'),
@@ -124,8 +129,9 @@ final class Transcript
         $url = 'https://www.youtube.com/watch?v=' . $videoId;
 
         $cmd = sprintf(
-            '%s -x --audio-format mp3 --audio-quality 9 -o %s %s 2>&1',
+            '%s%s -x --audio-format mp3 --audio-quality 9 -o %s %s 2>&1',
             escapeshellarg($bin),
+            self::proxyArg(),
             escapeshellarg($tmpDir . '/audio.%(ext)s'),
             escapeshellarg($url)
         );
@@ -203,6 +209,18 @@ final class Transcript
     {
         $base = sys_get_temp_dir() . '/newss_' . wp_generate_password(10, false);
         return @mkdir($base, 0700, true) ? $base : '';
+    }
+
+    /**
+     * Returns ' --proxy <escaped-url>' (with leading space) or '' if no proxy configured.
+     */
+    private static function proxyArg(): string
+    {
+        $proxy = Http::randomProxy();
+        if ($proxy === null) {
+            return '';
+        }
+        return ' --proxy ' . escapeshellarg($proxy);
     }
 
     private function cleanup(string $dir): void

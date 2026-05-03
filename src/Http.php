@@ -59,6 +59,19 @@ final class Http
     }
 
     /**
+     * Returns a random configured proxy URL or null if none configured.
+     * Used by Transcript-Adapter (yt-dlp via --proxy) for direct shell calls.
+     */
+    public static function randomProxy(): ?string
+    {
+        $proxies = self::loadProxies();
+        if ($proxies === []) {
+            return null;
+        }
+        return $proxies[array_rand($proxies)];
+    }
+
+    /**
      * @return string[] List of proxy URLs ready for CURLOPT_PROXY.
      */
     private static function loadProxies(): array
