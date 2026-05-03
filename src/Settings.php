@@ -278,7 +278,7 @@ final class Settings
                                 'hide_empty'        => false,
                             ]);
                             ?>
-                            <p class="description">Wird genutzt, wenn die KI keine passende Kategorie auswählt und kein Kanal-Override gesetzt ist.</p>
+                            <p class="description">Letzter Fallback wenn weder KI eine Kategorie auswählt noch beim Kanal eine gesetzt ist.</p>
                         </td>
                     </tr>
                     <tr>
@@ -288,7 +288,7 @@ final class Settings
                             <p class="description">
                                 Eine Kategorie pro Zeile. Claude wählt für jeden Artikel exakt eine aus dieser Liste.
                                 Fehlende Kategorien werden bei Bedarf in WordPress automatisch angelegt.<br>
-                                <strong>Override:</strong> Wenn beim Kanal eine Kategorie gesetzt ist, gewinnt diese — die KI-Auswahl wird ignoriert.
+                                <strong>Reihenfolge:</strong> KI-Auswahl gewinnt zuerst — die Kanal-Kategorie greift nur wenn die KI nichts Passendes findet, dann ggf. die Default-Kategorie.
                             </p>
                         </td>
                     </tr>

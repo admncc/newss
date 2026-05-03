@@ -99,12 +99,8 @@ final class PostBuilder
         return (int) $postId;
     }
 
-    private function resolveCategories(int $perChannelOverride, string $aiCategoryName): array
+    private function resolveCategories(int $perChannelFallback, string $aiCategoryName): array
     {
-        if ($perChannelOverride > 0) {
-            return [$perChannelOverride];
-        }
-
         if ($aiCategoryName !== '') {
             $allowed = Anthropic::categoryList();
             if (in_array($aiCategoryName, $allowed, true)) {
@@ -113,6 +109,10 @@ final class PostBuilder
                     return [$termId];
                 }
             }
+        }
+
+        if ($perChannelFallback > 0) {
+            return [$perChannelFallback];
         }
 
         $defaultCat = (int) get_option('newss_default_category', 0);
