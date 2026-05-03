@@ -6,23 +6,30 @@ namespace Newss;
 
 final class Transcript
 {
+    public string $lastProvider = '';
+
     public function fetch(string $videoId): string
     {
+        $this->lastProvider = '';
+
         $supadataKey = (string) get_option('newss_supadata_api_key', '');
         if ($supadataKey !== '') {
             $text = $this->fetchSupadata($videoId, $supadataKey);
             if ($text !== '') {
+                $this->lastProvider = 'supadata';
                 return $text;
             }
         }
 
         $text = $this->fetchYtDlp($videoId);
         if ($text !== '') {
+            $this->lastProvider = 'yt-dlp';
             return $text;
         }
         if ((bool) get_option('newss_whisper_enabled', false)) {
             $text = $this->fetchWhisper($videoId);
             if ($text !== '') {
+                $this->lastProvider = 'whisper';
                 return $text;
             }
         }

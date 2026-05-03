@@ -38,11 +38,13 @@ final class Worker
         }
 
         try {
-            $transcript = (new Transcript())->fetch($videoId);
+            $tx = new Transcript();
+            $transcript = $tx->fetch($videoId);
             if ($transcript === '' || mb_strlen($transcript) < 50) {
                 self::skip('transcript missing/too-short (' . mb_strlen($transcript) . ' chars)', $videoId);
                 return;
             }
+            self::log(sprintf('transcript via %s (%d chars)', $tx->lastProvider ?: 'unknown', mb_strlen($transcript)));
 
             $rewrite = (new Anthropic())->rewrite($transcript, $payload);
             if (!$rewrite) {

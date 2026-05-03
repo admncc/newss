@@ -136,6 +136,7 @@ final class Status
                         <th style="width:120px">Letztes Update</th>
                         <th>Video</th>
                         <th style="width:140px">Channel</th>
+                        <th style="width:80px">Quelle</th>
                         <th style="width:160px">Artikel / Grund</th>
                         <th>Letzter Log-Eintrag</th>
                     </tr>
@@ -151,6 +152,7 @@ final class Status
                             <a href="https://www.youtube.com/watch?v=<?php echo esc_attr($r['video_id']); ?>" target="_blank" rel="noopener" style="font-size:11px"><?php echo esc_html($r['video_id']); ?></a>
                         </td>
                         <td><?php echo esc_html($r['channel']); ?></td>
+                        <td style="font-size:11px"><?php echo $r['provider'] !== '' ? self::providerBadge($r['provider']) : '—'; ?></td>
                         <td style="font-size:11px">
                             <?php if (!empty($r['post_url'])): ?>
                                 <a href="<?php echo esc_url($r['post_url']); ?>" target="_blank" rel="noopener">→ Ansehen</a>
@@ -347,6 +349,13 @@ final class Status
 
             $effective = $status;
             $reason = '';
+            $provider = '';
+            foreach ($logs ?: [] as $log) {
+                $msg = $log->get_message();
+                if (preg_match('/\[newss\]\s+transcript via (\S+)/', $msg, $m)) {
+                    $provider = $m[1];
+                }
+            }
             if ($status === 'complete') {
                 if ($postUrl !== '') {
                     $effective = 'posted';
@@ -369,6 +378,7 @@ final class Status
                 'status'     => $status,
                 'effective'  => $effective,
                 'reason'     => $reason,
+                'provider'   => $provider,
                 'video_id'   => $videoId,
                 'title'      => self::shorten((string) ($payload['video_title'] ?? ''), 80),
                 'channel'    => (string) ($payload['channel_name'] ?? ''),
@@ -450,6 +460,16 @@ final class Status
             'complete'    => self::badge('complete','#eaf7e6', '#0a5a00'),
             'failed'      => self::badge('failed',  '#ffe6e6', '#7a0000'),
             default       => esc_html($status),
+        };
+    }
+
+    private static function providerBadge(string $provider): string
+    {
+        return match ($provider) {
+            'supadata' => self::badge('supadata', '#e6f0ff', '#0040b0'),
+            'yt-dlp'   => self::badge('yt-dlp',   '#e6f7ff', '#005a7a'),
+            'whisper'  => self::badge('whisper',  '#f0e6ff', '#5a1a8a'),
+            default    => esc_html($provider),
         };
     }
 
