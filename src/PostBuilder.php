@@ -182,8 +182,16 @@ final class PostBuilder
 
     private function disclosureHtml(string $channel): string
     {
-        return '<div class="newss-disclosure" style="margin-top:30px;padding:10px 12px;border:1px solid #eee;background:#fafafa;font-size:0.8em;color:#777;">'
-            . '<p>Dieser Artikel wurde KI-gestützt erstellt und kann Fehler enthalten.</p></div>';
+        $channelLabel = $channel !== '' ? esc_html($channel) : 'YouTube-Kanal-Betreiber';
+        return sprintf(
+            '<div class="newss-disclosure" style="margin-top:30px;padding:12px 14px;border:1px solid #eee;background:#fafafa;font-size:0.8em;color:#555;line-height:1.6;">'
+            . '<p style="margin:0"><strong>Hinweis:</strong> Dieser Artikel wurde KI-gestützt auf Basis des oben verlinkten YouTube-Videos erstellt und kann Fehler oder Ungenauigkeiten enthalten. '
+            . 'Das verwendete Beitragsbild ist das YouTube-Vorschaubild des Original-Videos. '
+            . 'Sämtliche Urheberrechte am Video, am Vorschaubild und an den darin enthaltenen Inhalten liegen beim jeweiligen YouTube-Kanal-Betreiber (%s). '
+            . 'Bei Fragen oder Anliegen zur Nutzung bitte über das <a href="%s">Impressum</a> kontaktieren.</p></div>',
+            $channelLabel,
+            esc_url(get_privacy_policy_url() ?: home_url('/impressum/'))
+        );
     }
 
     private function sanitizeBodyHtml(string $html): string
