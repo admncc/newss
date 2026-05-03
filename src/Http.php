@@ -16,6 +16,8 @@ final class Http
 {
     public static function get(string $url, array $args = []): array|\WP_Error
     {
+        $args = self::injectYoutubeCookies($url, $args);
+
         $proxies = self::loadProxies();
         if ($proxies === []) {
             return wp_remote_get($url, $args);
@@ -36,6 +38,19 @@ final class Http
         } finally {
             remove_action('http_api_curl', $filter);
         }
+    }
+
+    private static function injectYoutubeCookies(string $url, array $args): array
+    {
+        if (!preg_match('#^https?://(?:[a-z0-9-]+\.)?youtube(?:-nocookie)?\.com/#i', $url)) {
+            return $args;
+        }
+        $cookie = 'CONSENT=YES+cb.20210328-17-p0.de+FX+1; SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmRlIAEaBgiA_LyaBg';
+        $args['headers'] = ($args['headers'] ?? []);
+        if (empty($args['headers']['Cookie']) && empty($args['headers']['cookie'])) {
+            $args['headers']['Cookie'] = $cookie;
+        }
+        return $args;
     }
 
     /**
