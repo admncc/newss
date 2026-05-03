@@ -19,6 +19,8 @@ $options = [
     'newss_default_category',
     'newss_category_list',
     'newss_default_status',
+    'newss_blocked_topics',
+    'newss_blocked_action',
     'newss_kill_switch_drafts',
     'newss_post_author',
     'newss_channels',

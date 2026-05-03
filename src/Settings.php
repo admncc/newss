@@ -53,6 +53,8 @@ final class Settings
             'newss_whisper_api_key'        => 'sanitize_text_field',
             'newss_default_category'       => 'absint',
             'newss_category_list'          => [self::class, 'sanitizeMultiline'],
+            'newss_blocked_topics'         => [self::class, 'sanitizeBlockedTopics'],
+            'newss_blocked_action'         => [self::class, 'sanitizeBlockedAction'],
             'newss_default_status'         => [self::class, 'sanitizeStatus'],
             'newss_kill_switch_drafts'     => 'absint',
             'newss_post_author'            => 'absint',
@@ -76,6 +78,20 @@ final class Settings
     public static function sanitizeStatus($value): string
     {
         return in_array($value, ['publish', 'draft'], true) ? $value : 'publish';
+    }
+
+    public static function sanitizeBlockedTopics($value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+        $allowed = array_keys(Anthropic::topicLabels());
+        return array_values(array_intersect(array_map('strval', $value), $allowed));
+    }
+
+    public static function sanitizeBlockedAction($value): string
+    {
+        return in_array($value, ['skip', 'draft'], true) ? $value : 'skip';
     }
 
     public static function handleRunNow(): void
@@ -115,7 +131,9 @@ final class Settings
         $defCat      = (int)    get_option('newss_default_category', 0);
         $catList     = (string) get_option('newss_category_list', Anthropic::defaultCategoriesText());
         $defStatus   = (string) get_option('newss_default_status', 'publish');
-        $killSwitch  = (int)    get_option('newss_kill_switch_drafts', 0);
+        $blockedTopics = (array) get_option('newss_blocked_topics', []);
+        $blockedAction = (string) get_option('newss_blocked_action', 'skip');
+        $killSwitch    = (int)    get_option('newss_kill_switch_drafts', 0);
         $postAuthor  = (int)    get_option('newss_post_author', 0);
 
         $lastPoll = get_option('newss_last_poll', null);
@@ -305,6 +323,29 @@ final class Settings
                         <th scope="row">Kill-Switch</th>
                         <td>
                             <label><input type="checkbox" name="newss_kill_switch_drafts" value="1" <?php checked($killSwitch, 1); ?>> <strong>Notfall:</strong> alle neuen Posts als Entwurf, ignoriere obigen Status</label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Sensible Themen</th>
+                        <td>
+                            <fieldset>
+                                <legend class="screen-reader-text"><span>Sensible Themen</span></legend>
+                                <?php foreach (Anthropic::topicLabels() as $key => $label): ?>
+                                    <label style="display:block;margin-bottom:4px">
+                                        <input type="checkbox" name="newss_blocked_topics[]" value="<?php echo esc_attr($key); ?>" <?php checked(in_array($key, $blockedTopics, true)); ?>>
+                                        <?php echo esc_html($label); ?>
+                                        <code style="font-size:11px;color:#888"><?php echo esc_html($key); ?></code>
+                                    </label>
+                                <?php endforeach; ?>
+                            </fieldset>
+                            <p class="description">Wenn die KI eines dieser Topics für ein Video erkennt, wird der Artikel je nach Aktion unten behandelt.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Aktion bei Treffer</th>
+                        <td>
+                            <label style="margin-right:20px"><input type="radio" name="newss_blocked_action" value="skip" <?php checked($blockedAction, 'skip'); ?>> Überspringen (kein Post)</label>
+                            <label><input type="radio" name="newss_blocked_action" value="draft" <?php checked($blockedAction, 'draft'); ?>> Als Entwurf anlegen (zur manuellen Sichtung)</label>
                         </td>
                     </tr>
                     <tr>

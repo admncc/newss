@@ -140,8 +140,29 @@ final class Anthropic
                         'maxLength'   => 125,
                         'description' => 'Alt-Text für das Featured Image, beschreibt Bildinhalt + enthält Fokus-Keyword.',
                     ],
+                    'topic_tags' => [
+                        'type'        => 'array',
+                        'items'       => [
+                            'type' => 'string',
+                            'enum' => array_keys(self::topicLabels()),
+                        ],
+                        'description' => 'Liste aller sensiblen Themen die im Hauptthema vorkommen. Leeres Array wenn keins zutrifft.',
+                    ],
                 ],
             ],
+        ];
+    }
+
+    public static function topicLabels(): array
+    {
+        return [
+            'krieg-konflikt'           => 'Krieg & militärische Konflikte',
+            'gewalt-verbrechen'        => 'Gewalt & Verbrechen',
+            'sex-erotik'               => 'Sexuelle / erotische Inhalte',
+            'suizid-selbstverletzung'  => 'Suizid & Selbstverletzung',
+            'drogen-sucht'             => 'Drogen & Sucht',
+            'extremismus-hass'         => 'Extremismus & Hassrede',
+            'terror'                   => 'Terrorismus',
         ];
     }
 
@@ -187,6 +208,7 @@ SEO-Vorgaben (Pflicht):
 - Image-Alt: 40–125 Zeichen, beschreibt was im Bild zu sehen wäre, enthält Fokus-Keyword
 - Tags: 3–6 thematisch relevante Begriffe (Personennamen, Orte, Schlüsselthemen)
 - Kategorie: wähle exakt eine Kategorie aus der vorgegebenen Liste (siehe Tool-Schema enum). Wenn nichts perfekt passt, nimm die thematisch nächstliegende — keine eigene Kategorie erfinden.
+- Topic-Tags: gib im Feld topic_tags alle aus der Enum-Liste passenden Tags zurück, wenn das Hauptthema des Videos eines davon ist (z. B. Kriegsberichterstattung → "krieg-konflikt", erotischer Inhalt → "sex-erotik"). Wenn keins zutrifft, leeres Array.
 
 Body-Struktur (700–1000 Wörter):
 - Lead-Absatz (80–120 Wörter): Fokus-Keyword in den ersten 100 Wörtern, beantwortet die wichtigsten W-Fragen direkt

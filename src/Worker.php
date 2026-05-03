@@ -44,6 +44,31 @@ final class Worker
             throw new \RuntimeException('Claude rewrite failed; will retry');
         }
 
+        $blockedHits = self::blockedTopicHits($rewrite);
+        if ($blockedHits !== []) {
+            $action = (string) get_option('newss_blocked_action', 'skip');
+            error_log(sprintf(
+                '[newss] sensitive topics for %s: [%s] -> action=%s',
+                $videoId,
+                implode(',', $blockedHits),
+                $action
+            ));
+            if ($action === 'skip') {
+                return;
+            }
+            $rewrite['_force_draft'] = 1;
+        }
+
         (new PostBuilder())->createPost($rewrite, $payload);
+    }
+
+    private static function blockedTopicHits(array $rewrite): array
+    {
+        $tags    = array_values(array_filter((array) ($rewrite['topic_tags'] ?? [])));
+        $blocked = array_values(array_filter((array) get_option('newss_blocked_topics', [])));
+        if ($tags === [] || $blocked === []) {
+            return [];
+        }
+        return array_values(array_intersect($tags, $blocked));
     }
 }

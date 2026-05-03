@@ -13,9 +13,10 @@ final class PostBuilder
         $channelId = (string) ($payload['channel_id'] ?? '');
         $published = (string) ($payload['published'] ?? '');
 
-        $killSwitch = (bool) get_option('newss_kill_switch_drafts', false);
+        $killSwitch    = (bool) get_option('newss_kill_switch_drafts', false);
+        $forceDraft    = !empty($rewrite['_force_draft']);
         $defaultStatus = (string) get_option('newss_default_status', 'publish');
-        $status = $killSwitch ? 'draft' : ($defaultStatus === 'draft' ? 'draft' : 'publish');
+        $status = ($killSwitch || $forceDraft || $defaultStatus === 'draft') ? 'draft' : 'publish';
 
         $title           = sanitize_text_field((string) ($rewrite['title'] ?? ''));
         $slug            = sanitize_title((string) ($rewrite['slug'] ?? ''));
