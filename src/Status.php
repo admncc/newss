@@ -66,7 +66,7 @@ final class Status
             $allRows = self::fetchSince($since, 500, 0);
             $allRows = array_values(array_filter(
                 $allRows,
-                static fn(array $r): bool => ($r['channel_id'] ?? '') === $channelFilter
+                static fn(array $r): bool => ($r['channel'] ?? '') === $channelFilter
             ));
             $total = count($allRows);
             $totalPages = max(1, (int) ceil($total / $perPage));
@@ -106,12 +106,18 @@ final class Status
             <label for="newss_channel" style="font-weight:600">Filter nach Kanal:</label>
             <select name="newss_channel" id="newss_channel" onchange="this.form.submit()">
                 <option value="">— Alle Kanäle —</option>
-                <?php foreach ($channels as $ch):
-                    $cid = (string) ($ch['id'] ?? '');
-                    if ($cid === '') continue;
-                    ?>
-                    <option value="<?php echo esc_attr($cid); ?>" <?php selected($channelFilter, $cid); ?>>
-                        <?php echo esc_html((string) ($ch['name'] ?? $cid)); ?>
+                <?php
+                $names = [];
+                foreach ($channels as $ch) {
+                    $name = trim((string) ($ch['name'] ?? ''));
+                    if ($name !== '') {
+                        $names[$name] = true;
+                    }
+                }
+                ksort($names);
+                foreach (array_keys($names) as $name): ?>
+                    <option value="<?php echo esc_attr($name); ?>" <?php selected($channelFilter, $name); ?>>
+                        <?php echo esc_html($name); ?>
                     </option>
                 <?php endforeach; ?>
             </select>
