@@ -64,13 +64,14 @@ final class Status
         <?php if (!$rows): ?>
             <p><em>Keine Jobs in der Pipeline.</em></p>
         <?php else: ?>
-            <table class="widefat striped" style="max-width:1080px">
+            <table class="widefat striped" style="max-width:1180px">
                 <thead>
                     <tr>
                         <th style="width:90px">Status</th>
                         <th style="width:130px">Geplant für</th>
                         <th>Video</th>
-                        <th style="width:160px">Channel</th>
+                        <th style="width:140px">Channel</th>
+                        <th style="width:140px">Artikel</th>
                         <th>Letzter Log-Eintrag</th>
                     </tr>
                 </thead>
@@ -84,6 +85,16 @@ final class Status
                             <a href="https://www.youtube.com/watch?v=<?php echo esc_attr($r['video_id']); ?>" target="_blank" rel="noopener" style="font-size:11px"><?php echo esc_html($r['video_id']); ?></a>
                         </td>
                         <td><?php echo esc_html($r['channel']); ?></td>
+                        <td style="font-size:11px">
+                            <?php if (!empty($r['post_url'])): ?>
+                                <a href="<?php echo esc_url($r['post_url']); ?>" target="_blank" rel="noopener">→ Ansehen</a>
+                                <?php if (!empty($r['edit_url'])): ?>
+                                    <br><a href="<?php echo esc_url($r['edit_url']); ?>">→ Bearbeiten</a>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                —
+                            <?php endif; ?>
+                        </td>
                         <td style="font-size:11px;<?php echo $r['status'] === 'failed' ? 'color:#c00' : 'color:#666'; ?>">
                             <?php echo esc_html($r['last_log']); ?>
                         </td>
@@ -173,13 +184,34 @@ final class Status
             $next = $schedule && method_exists($schedule, 'get_date') ? $schedule->get_date() : null;
             $logs = $logger->get_logs($actionId);
             $lastLog = $logs ? end($logs) : null;
+
+            $videoId = (string) ($payload['video_id'] ?? '');
+            $postUrl = '';
+            $editUrl = '';
+            if ($status === 'complete' && $videoId !== '') {
+                $posts = get_posts([
+                    'meta_key'       => '_newss_video_id',
+                    'meta_value'     => $videoId,
+                    'post_status'    => 'any',
+                    'posts_per_page' => 1,
+                    'fields'         => 'ids',
+                    'no_found_rows'  => true,
+                ]);
+                if ($posts) {
+                    $postUrl = (string) get_permalink((int) $posts[0]);
+                    $editUrl = (string) get_edit_post_link((int) $posts[0], '');
+                }
+            }
+
             $out[] = [
                 'status'     => $status,
-                'video_id'   => (string) ($payload['video_id'] ?? ''),
+                'video_id'   => $videoId,
                 'title'      => self::shorten((string) ($payload['video_title'] ?? ''), 80),
                 'channel'    => (string) ($payload['channel_name'] ?? ''),
                 'scheduled'  => $next ? $next->format('Y-m-d H:i') : '—',
                 'last_log'   => $lastLog ? self::shorten($lastLog->get_message(), 200) : '',
+                'post_url'   => $postUrl,
+                'edit_url'   => $editUrl,
             ];
         }
         return $out;
