@@ -64,6 +64,7 @@ final class Settings
             'newss_system_prompt'          => [self::class, 'sanitizeMultiline'],
             'newss_user_prompt_template'   => [self::class, 'sanitizeMultiline'],
             'newss_youtube_proxy'          => [self::class, 'sanitizeMultiline'],
+            'newss_youtube_cookie'         => 'sanitize_text_field',
             'newss_ytdlp_path'             => 'sanitize_text_field',
             'newss_whisper_enabled'        => 'absint',
             'newss_default_category'       => 'absint',
@@ -273,6 +274,17 @@ final class Settings
                                 Bei mehreren Einträgen wird pro Request randomisiert einer gewählt.
                                 Wird nur für YouTube-RSS und Channel-Resolver genutzt — Anthropic und Supadata gehen direkt.
                                 Leer lassen = kein Proxy.
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="newss_youtube_cookie">Consent-Cookie</label></th>
+                        <td>
+                            <input type="text" id="newss_youtube_cookie" name="newss_youtube_cookie" value="<?php echo esc_attr((string) get_option('newss_youtube_cookie', \Newss\Http::DEFAULT_YT_COOKIE)); ?>" class="large-text code" placeholder="<?php echo esc_attr(\Newss\Http::DEFAULT_YT_COOKIE); ?>">
+                            <p class="description">
+                                Wird bei DE-/EU-IPs gebraucht damit YouTube nicht die Consent-Wall serviert.
+                                Default funktioniert seit 2021; falls YouTube den irgendwann invalidiert hier neuen Wert eintragen.
+                                Leer = kein Cookie senden.
                             </p>
                         </td>
                     </tr>

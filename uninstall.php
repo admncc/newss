@@ -15,6 +15,7 @@ $options = [
     'newss_system_prompt',
     'newss_user_prompt_template',
     'newss_youtube_proxy',
+    'newss_youtube_cookie',
     'newss_supadata_api_key',
     'newss_ytdlp_path',
     'newss_whisper_enabled',

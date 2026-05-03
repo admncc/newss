@@ -40,12 +40,17 @@ final class Http
         }
     }
 
+    public const DEFAULT_YT_COOKIE = 'CONSENT=YES+cb.20210328-17-p0.de+FX+1; SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmRlIAEaBgiA_LyaBg';
+
     private static function injectYoutubeCookies(string $url, array $args): array
     {
         if (!preg_match('#^https?://(?:[a-z0-9-]+\.)?youtube(?:-nocookie)?\.com/#i', $url)) {
             return $args;
         }
-        $cookie = 'CONSENT=YES+cb.20210328-17-p0.de+FX+1; SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmRlIAEaBgiA_LyaBg';
+        $cookie = trim((string) get_option('newss_youtube_cookie', self::DEFAULT_YT_COOKIE));
+        if ($cookie === '') {
+            return $args;
+        }
         $args['headers'] = ($args['headers'] ?? []);
         if (empty($args['headers']['Cookie']) && empty($args['headers']['cookie'])) {
             $args['headers']['Cookie'] = $cookie;

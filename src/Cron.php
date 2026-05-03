@@ -38,7 +38,7 @@ final class Cron
         if (!$current) {
             $tz = new \DateTimeZone('Europe/Berlin');
             $now = new \DateTimeImmutable('now', $tz);
-            $target = $now->setTime((int) $now->format('H') + 1, 0, 0);
+            $target = $now->modify('+1 hour')->setTime((int) $now->modify('+1 hour')->format('H'), 0, 0);
             wp_schedule_event($target->getTimestamp(), 'hourly', self::HOOK_PERIODIC);
         }
     }

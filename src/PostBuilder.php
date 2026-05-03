@@ -87,11 +87,30 @@ final class PostBuilder
             }
         }
 
-        kses_remove_filters();
+        $iframeFilter = static function (array $tags, $context): array {
+            if ($context !== 'post') {
+                return $tags;
+            }
+            $tags['iframe'] = [
+                'src'             => true,
+                'width'           => true,
+                'height'          => true,
+                'frameborder'     => true,
+                'allow'           => true,
+                'allowfullscreen' => true,
+                'loading'         => true,
+                'style'           => true,
+                'class'           => true,
+            ];
+            $tags['div']['style'] = true;
+            $tags['div']['class'] = true;
+            return $tags;
+        };
+        add_filter('wp_kses_allowed_html', $iframeFilter, 10, 2);
         try {
             $postId = wp_insert_post($postArr, true);
         } finally {
-            kses_init_filters();
+            remove_filter('wp_kses_allowed_html', $iframeFilter, 10);
         }
         if (is_wp_error($postId)) {
             throw new \RuntimeException('wp_insert_post failed: ' . $postId->get_error_message());
@@ -208,8 +227,8 @@ final class PostBuilder
             "https://i.ytimg.com/vi/{$videoId}/hqdefault.jpg",
         ];
         foreach ($candidates as $url) {
-            $tmp = download_url($url, 30);
-            if (is_wp_error($tmp)) {
+            $tmp = $this->downloadViaHttp($url);
+            if ($tmp === '') {
                 continue;
             }
             if (filesize($tmp) < 5_000) {
@@ -231,5 +250,29 @@ final class PostBuilder
             set_post_thumbnail($postId, $attachId);
             return;
         }
+    }
+
+    private function downloadViaHttp(string $url): string
+    {
+        $resp = Http::get($url, ['timeout' => 30]);
+        if (is_wp_error($resp)) {
+            return '';
+        }
+        if ((int) wp_remote_retrieve_response_code($resp) !== 200) {
+            return '';
+        }
+        $body = (string) wp_remote_retrieve_body($resp);
+        if ($body === '') {
+            return '';
+        }
+        $tmp = wp_tempnam('newss-thumb-');
+        if (!$tmp) {
+            return '';
+        }
+        if (file_put_contents($tmp, $body) === false) {
+            @unlink($tmp);
+            return '';
+        }
+        return $tmp;
     }
 }
