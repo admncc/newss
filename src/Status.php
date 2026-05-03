@@ -132,7 +132,7 @@ final class Status
                 <thead>
                     <tr>
                         <th style="width:90px">Status</th>
-                        <th style="width:120px">Geplant</th>
+                        <th style="width:120px">Erstellt</th>
                         <th style="width:120px">Letztes Update</th>
                         <th>Video</th>
                         <th style="width:140px">Channel</th>
@@ -144,7 +144,7 @@ final class Status
                 <?php foreach ($rows as $r): ?>
                     <tr>
                         <td><?php echo self::statusBadge($r['effective']); ?></td>
-                        <td style="font-size:11px"><?php echo esc_html($r['scheduled']); ?></td>
+                        <td style="font-size:11px"><?php echo esc_html($r['created'] ?: '—'); ?></td>
                         <td style="font-size:11px"><?php echo esc_html($r['updated'] ?: '—'); ?></td>
                         <td>
                             <strong><?php echo esc_html($r['title']); ?></strong><br>
@@ -268,6 +268,8 @@ final class Status
         $store  = \ActionScheduler::store();
         $logger = \ActionScheduler::logger();
 
+        $createdMap = self::lookupCreatedDates($ids);
+
         $rawRows = [];
         $videoIdsToLookup = [];
         foreach ($ids as $actionId) {
@@ -293,11 +295,12 @@ final class Status
             }
 
             $rawRows[] = [
-                'status'   => $status,
-                'payload'  => $payload,
-                'next'     => $next,
-                'logs'     => $logs,
-                'video_id' => $videoId,
+                'action_id' => (int) $actionId,
+                'status'    => $status,
+                'payload'   => $payload,
+                'next'      => $next,
+                'logs'      => $logs,
+                'video_id'  => $videoId,
             ];
         }
 
@@ -319,6 +322,16 @@ final class Status
                     if ($d) {
                         $updated = wp_date('Y-m-d H:i', $d->getTimestamp());
                     }
+                } catch (\Throwable) {
+                    // ignore
+                }
+            }
+
+            $created = '';
+            if (isset($createdMap[$r['action_id']])) {
+                try {
+                    $cd = new \DateTime($createdMap[$r['action_id']], new \DateTimeZone('UTC'));
+                    $created = wp_date('Y-m-d H:i', $cd->getTimestamp());
                 } catch (\Throwable) {
                     // ignore
                 }
@@ -360,7 +373,7 @@ final class Status
                 'title'      => self::shorten((string) ($payload['video_title'] ?? ''), 80),
                 'channel'    => (string) ($payload['channel_name'] ?? ''),
                 'channel_id' => (string) ($payload['channel_id'] ?? ''),
-                'scheduled'  => $next ? $next->format('Y-m-d H:i') : '—',
+                'created'    => $created,
                 'updated'    => $updated,
                 'last_log'   => $lastLog ? self::shorten($lastLog->get_message(), 200) : '',
                 'post_url'   => $postUrl,
@@ -368,6 +381,30 @@ final class Status
             ];
         }
         return $out;
+    }
+
+    /**
+     * @param int[] $actionIds
+     * @return array<int,string> map action_id -> scheduled_date_gmt (UTC)
+     */
+    private static function lookupCreatedDates(array $actionIds): array
+    {
+        if ($actionIds === []) {
+            return [];
+        }
+        global $wpdb;
+        $ids = array_map('intval', $actionIds);
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $sql = $wpdb->prepare(
+            "SELECT action_id, scheduled_date_gmt FROM {$wpdb->prefix}actionscheduler_actions WHERE action_id IN ($placeholders)",
+            $ids
+        );
+        $rows = $wpdb->get_results($sql, ARRAY_A) ?: [];
+        $map = [];
+        foreach ($rows as $row) {
+            $map[(int) $row['action_id']] = (string) $row['scheduled_date_gmt'];
+        }
+        return $map;
     }
 
     /**
