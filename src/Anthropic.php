@@ -17,6 +17,11 @@ final class Anthropic
             return null;
         }
 
+        if (!self::reserveDailyQuota()) {
+            error_log('[newss] daily Anthropic call cap reached; skipping');
+            return null;
+        }
+
         $model       = (string) get_option('newss_anthropic_model', 'claude-sonnet-4-6');
         $maxTokens   = (int) get_option('newss_anthropic_max_tokens', 4000);
         $temperature = (float) get_option('newss_anthropic_temperature', 1.0);
@@ -47,26 +52,50 @@ final class Anthropic
             'tool_choice' => ['type' => 'tool', 'name' => 'publish_article'],
         ];
 
-        $resp = wp_remote_post(self::API_URL, [
-            'timeout' => 120,
-            'headers' => [
-                'x-api-key'         => $apiKey,
-                'anthropic-version' => self::API_VERSION,
-                'content-type'      => 'application/json',
-            ],
-            'body' => wp_json_encode($body),
-        ]);
+        $maxAttempts = 3;
+        $attempt = 0;
+        while (true) {
+            $attempt++;
+            $resp = wp_remote_post(self::API_URL, [
+                'timeout' => 120,
+                'headers' => [
+                    'x-api-key'         => $apiKey,
+                    'anthropic-version' => self::API_VERSION,
+                    'content-type'      => 'application/json',
+                ],
+                'body' => wp_json_encode($body),
+            ]);
 
-        if (is_wp_error($resp)) {
-            error_log('[newss] anthropic error: ' . $resp->get_error_message());
+            if (is_wp_error($resp)) {
+                error_log('[newss] anthropic network error (try ' . $attempt . '): ' . $resp->get_error_message());
+                if ($attempt >= $maxAttempts) {
+                    throw new \RuntimeException('Anthropic network failure after ' . $maxAttempts . ' attempts');
+                }
+                sleep(2 ** $attempt);
+                continue;
+            }
+            $code = (int) wp_remote_retrieve_response_code($resp);
+            $raw  = (string) wp_remote_retrieve_body($resp);
+
+            if ($code === 200) {
+                break;
+            }
+
+            // 429 + 5xx = retry-worthy
+            if ($code === 429 || $code >= 500) {
+                error_log("[newss] anthropic HTTP {$code} (try {$attempt}): " . substr($raw, 0, 300));
+                if ($attempt >= $maxAttempts) {
+                    throw new \RuntimeException("Anthropic HTTP {$code} after {$maxAttempts} attempts; will retry via AS");
+                }
+                sleep(2 ** $attempt);
+                continue;
+            }
+
+            // Permanent 4xx = skip (no retry, return null)
+            error_log("[newss] anthropic HTTP {$code} (permanent): " . substr($raw, 0, 300));
             return null;
         }
-        $code = (int) wp_remote_retrieve_response_code($resp);
-        $raw  = (string) wp_remote_retrieve_body($resp);
-        if ($code !== 200) {
-            error_log("[newss] anthropic HTTP {$code}: {$raw}");
-            return null;
-        }
+
         $data = json_decode($raw, true);
         if (!is_array($data)) {
             return null;
@@ -78,6 +107,28 @@ final class Anthropic
             }
         }
         return null;
+    }
+
+    /**
+     * Atomic daily cap: returns false if today's call limit is reached.
+     */
+    private static function reserveDailyQuota(): bool
+    {
+        $cap = (int) get_option('newss_anthropic_daily_cap', 0);
+        if ($cap <= 0) {
+            return true;
+        }
+        $today = wp_date('Y-m-d');
+        $opt   = get_option('newss_anthropic_calls_today', null);
+        $count = (is_array($opt) && ($opt['date'] ?? '') === $today) ? (int) ($opt['count'] ?? 0) : 0;
+        if ($count >= $cap) {
+            return false;
+        }
+        update_option('newss_anthropic_calls_today', [
+            'date'  => $today,
+            'count' => $count + 1,
+        ], false);
+        return true;
     }
 
     private static function publishArticleTool(): array

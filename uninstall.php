@@ -8,6 +8,8 @@ $options = [
     'newss_anthropic_api_key',
     'newss_anthropic_model',
     'newss_anthropic_max_tokens',
+    'newss_anthropic_daily_cap',
+    'newss_anthropic_calls_today',
     'newss_anthropic_temperature',
     'newss_system_prompt',
     'newss_user_prompt_template',

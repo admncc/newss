@@ -39,18 +39,33 @@ final class Settings
 
     public static function registerSettings(): void
     {
+        register_setting(self::OPTION_GROUP, 'newss_anthropic_api_key', [
+            'sanitize_callback' => 'sanitize_text_field',
+            'show_in_rest'      => false,
+            'default'           => '',
+            'autoload'          => false,
+        ]);
+        register_setting(self::OPTION_GROUP, 'newss_supadata_api_key', [
+            'sanitize_callback' => 'sanitize_text_field',
+            'default'           => '',
+            'autoload'          => false,
+        ]);
+        register_setting(self::OPTION_GROUP, 'newss_whisper_api_key', [
+            'sanitize_callback' => 'sanitize_text_field',
+            'default'           => '',
+            'autoload'          => false,
+        ]);
+
         $opts = [
-            'newss_anthropic_api_key'      => 'sanitize_text_field',
             'newss_anthropic_model'        => 'sanitize_text_field',
             'newss_anthropic_max_tokens'   => 'absint',
+            'newss_anthropic_daily_cap'    => 'absint',
             'newss_anthropic_temperature'  => [self::class, 'sanitizeTemperature'],
             'newss_system_prompt'          => [self::class, 'sanitizeMultiline'],
             'newss_user_prompt_template'   => [self::class, 'sanitizeMultiline'],
             'newss_youtube_proxy'          => [self::class, 'sanitizeMultiline'],
-            'newss_supadata_api_key'       => 'sanitize_text_field',
             'newss_ytdlp_path'             => 'sanitize_text_field',
             'newss_whisper_enabled'        => 'absint',
-            'newss_whisper_api_key'        => 'sanitize_text_field',
             'newss_default_category'       => 'absint',
             'newss_category_list'          => [self::class, 'sanitizeMultiline'],
             'newss_blocked_topics'         => [self::class, 'sanitizeBlockedTopics'],
@@ -216,6 +231,22 @@ final class Settings
                     <tr>
                         <th scope="row"><label for="newss_anthropic_temperature">Temperature</label></th>
                         <td><input type="number" id="newss_anthropic_temperature" name="newss_anthropic_temperature" value="<?php echo esc_attr((string) $temperature); ?>" min="0" max="1" step="0.1"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="newss_anthropic_daily_cap">Max Calls / Tag</label></th>
+                        <td>
+                            <?php
+                            $dailyCap = (int) get_option('newss_anthropic_daily_cap', 0);
+                            $callsToday = get_option('newss_anthropic_calls_today', null);
+                            $todayCount = (is_array($callsToday) && ($callsToday['date'] ?? '') === wp_date('Y-m-d')) ? (int) $callsToday['count'] : 0;
+                            ?>
+                            <input type="number" id="newss_anthropic_daily_cap" name="newss_anthropic_daily_cap" value="<?php echo esc_attr((string) $dailyCap); ?>" min="0" max="10000" step="10">
+                            <p class="description">
+                                Hard-Cap pro Kalendertag (Europe/Berlin). 0 = unbegrenzt.
+                                Heute bereits: <strong><?php echo (int) $todayCount; ?></strong> Calls.
+                                Bei Erreichen werden weitere Worker-Jobs als „skipped" markiert (kein Anthropic-Charge mehr).
+                            </p>
+                        </td>
                     </tr>
                     <tr>
                         <th scope="row"><label for="newss_system_prompt">System-Prompt</label></th>
