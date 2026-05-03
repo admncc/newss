@@ -23,7 +23,7 @@ final class Channels
             delete_transient('newss_channel_notice');
         }
 
-        $editId = isset($_GET['edit']) ? (string) $_GET['edit'] : '';
+        $editId = isset($_GET['edit']) ? sanitize_text_field(wp_unslash((string) $_GET['edit'])) : '';
         $editing = null;
         if ($editId !== '') {
             foreach ($channels as $ch) {
@@ -169,8 +169,8 @@ final class Channels
         }
         check_admin_referer('newss_channel_save');
 
-        $originalId = sanitize_text_field((string) ($_POST['original_id'] ?? ''));
-        $input      = (string) ($_POST['input'] ?? '');
+        $originalId = sanitize_text_field(wp_unslash((string) ($_POST['original_id'] ?? '')));
+        $input      = sanitize_text_field(wp_unslash((string) ($_POST['input'] ?? '')));
 
         $resolved = (new ChannelResolver())->resolve($input);
         if ($resolved === null) {
@@ -179,13 +179,13 @@ final class Channels
             return;
         }
 
-        $overrideName = sanitize_text_field((string) ($_POST['name'] ?? ''));
+        $overrideName = sanitize_text_field(wp_unslash((string) ($_POST['name'] ?? '')));
         $name = $overrideName !== '' ? $overrideName : (string) $resolved['name'];
 
         $entry = [
             'id'       => (string) $resolved['id'],
             'name'     => $name,
-            'category' => (int) ($_POST['category'] ?? 0),
+            'category' => absint($_POST['category'] ?? 0),
             'enabled'  => !empty($_POST['enabled']) ? 1 : 0,
         ];
 
@@ -231,7 +231,7 @@ final class Channels
         if (!current_user_can('manage_options')) {
             wp_die('Forbidden');
         }
-        $id = (string) ($_GET['id'] ?? '');
+        $id = sanitize_text_field(wp_unslash((string) ($_GET['id'] ?? '')));
         check_admin_referer('newss_channel_delete_' . $id);
 
         $channels = array_values(array_filter(
@@ -249,7 +249,7 @@ final class Channels
         if (!current_user_can('manage_options')) {
             wp_die('Forbidden');
         }
-        $id = (string) ($_GET['id'] ?? '');
+        $id = sanitize_text_field(wp_unslash((string) ($_GET['id'] ?? '')));
         check_admin_referer('newss_channel_toggle_' . $id);
 
         $channels = self::all();

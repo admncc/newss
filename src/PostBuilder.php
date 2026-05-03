@@ -9,6 +9,9 @@ final class PostBuilder
     public function createPost(array $rewrite, array $payload, bool $forceDraft = false): int
     {
         $videoId   = (string) ($payload['video_id'] ?? '');
+        if (!preg_match('/^[A-Za-z0-9_-]{11}$/', $videoId)) {
+            throw new \RuntimeException('invalid video id: ' . $videoId);
+        }
         $channel   = (string) ($payload['channel_name'] ?? '');
         $channelId = (string) ($payload['channel_id'] ?? '');
         $published = (string) ($payload['published'] ?? '');
@@ -71,7 +74,6 @@ final class PostBuilder
             'post_status'   => $status,
             'post_author'   => $authorId,
             'post_category' => $categoryIds,
-            'tags_input'    => $tags,
             'meta_input'    => $metaInput,
         ];
 
@@ -93,6 +95,10 @@ final class PostBuilder
         }
         if (is_wp_error($postId)) {
             throw new \RuntimeException('wp_insert_post failed: ' . $postId->get_error_message());
+        }
+
+        if ($tags !== []) {
+            wp_set_post_tags((int) $postId, $tags, false);
         }
 
         $this->setFeaturedImage((int) $postId, $videoId, $imageAlt !== '' ? $imageAlt : $title);

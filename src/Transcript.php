@@ -88,7 +88,7 @@ final class Transcript
 
         $cmd = sprintf(
             '%s --skip-download --write-auto-subs --write-subs --sub-langs %s --sub-format %s --convert-subs srt -o %s %s 2>&1',
-            escapeshellcmd($bin),
+            escapeshellarg($bin),
             escapeshellarg('de.*,de,en.*,en'),
             escapeshellarg('vtt/srt/best'),
             escapeshellarg($tmpDir . '/sub'),
@@ -125,7 +125,7 @@ final class Transcript
 
         $cmd = sprintf(
             '%s -x --audio-format mp3 --audio-quality 9 -o %s %s 2>&1',
-            escapeshellcmd($bin),
+            escapeshellarg($bin),
             escapeshellarg($tmpDir . '/audio.%(ext)s'),
             escapeshellarg($url)
         );
