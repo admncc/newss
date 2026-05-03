@@ -54,19 +54,37 @@ final class Status
             return;
         }
 
-        $statusCounts = self::statusCounts();
+        $statusCounts  = self::statusCounts();
+        $channelFilter = isset($_GET['newss_channel']) ? sanitize_text_field(wp_unslash((string) $_GET['newss_channel'])) : '';
 
-        $page    = max(1, (int) ($_GET['newss_page'] ?? 1));
+        $page    = max(1, absint($_GET['newss_page'] ?? 1));
         $perPage = self::PER_PAGE;
 
         $since = new \DateTime('24 hours ago', new \DateTimeZone('UTC'));
-        $total = self::countSince($since);
-        $totalPages = max(1, (int) ceil($total / $perPage));
-        if ($page > $totalPages) {
-            $page = $totalPages;
+
+        if ($channelFilter !== '') {
+            $allRows = self::fetchSince($since, 500, 0);
+            $allRows = array_values(array_filter(
+                $allRows,
+                static fn(array $r): bool => ($r['channel_id'] ?? '') === $channelFilter
+            ));
+            $total = count($allRows);
+            $totalPages = max(1, (int) ceil($total / $perPage));
+            if ($page > $totalPages) {
+                $page = $totalPages;
+            }
+            $rows = array_slice($allRows, ($page - 1) * $perPage, $perPage);
+        } else {
+            $total = self::countSince($since);
+            $totalPages = max(1, (int) ceil($total / $perPage));
+            if ($page > $totalPages) {
+                $page = $totalPages;
+            }
+            $rows = self::fetchSince($since, $perPage, ($page - 1) * $perPage);
         }
-        $offset = ($page - 1) * $perPage;
-        $rows = self::fetchSince($since, $perPage, $offset);
+
+        $channels = get_option('newss_channels', []);
+        $filterUrlBase = admin_url('admin.php?page=newss-settings');
 
         $statsLabels = [
             'pending'     => 'Pending',
@@ -76,12 +94,31 @@ final class Status
         ];
         ?>
         <h2>Job-Pipeline (letzte 24h)</h2>
-        <p class="description" style="max-width:1180px;margin-bottom:8px">
+        <p class="description" style="max-width:1280px;margin-bottom:8px">
             <?php foreach ($statusCounts as $key => $count): ?>
                 <span style="margin-right:14px"><strong><?php echo esc_html($statsLabels[$key] ?? $key); ?>:</strong> <?php echo (int) $count; ?></span>
             <?php endforeach; ?>
-            <span style="margin-left:auto;color:#888;font-size:11px">— „complete" enthält <em>posted</em>, <em>skipped</em> und <em>orphan</em>; siehe Status-Spalte unten</span>
+            <span style="margin-left:auto;color:#888;font-size:11px">— „complete" enthält <em>posted</em>, <em>skipped</em>, <em>orphan</em></span>
         </p>
+
+        <form method="get" action="" style="margin:8px 0 12px 0;display:flex;align-items:center;gap:8px">
+            <input type="hidden" name="page" value="newss-settings">
+            <label for="newss_channel" style="font-weight:600">Filter nach Kanal:</label>
+            <select name="newss_channel" id="newss_channel" onchange="this.form.submit()">
+                <option value="">— Alle Kanäle —</option>
+                <?php foreach ($channels as $ch):
+                    $cid = (string) ($ch['id'] ?? '');
+                    if ($cid === '') continue;
+                    ?>
+                    <option value="<?php echo esc_attr($cid); ?>" <?php selected($channelFilter, $cid); ?>>
+                        <?php echo esc_html((string) ($ch['name'] ?? $cid)); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <?php if ($channelFilter !== ''): ?>
+                <a href="<?php echo esc_url($filterUrlBase); ?>" class="button button-small">Filter zurücksetzen</a>
+            <?php endif; ?>
+        </form>
         <?php if (!$rows): ?>
             <p><em>Keine Jobs in der letzten 24 Stunden.</em></p>
         <?php else: ?>
@@ -131,23 +168,26 @@ final class Status
                 <?php endforeach; ?>
                 </tbody>
             </table>
-            <?php echo self::renderPagination($page, $totalPages, $total); ?>
+            <?php echo self::renderPagination($page, $totalPages, $total, $channelFilter); ?>
         <?php endif; ?>
         <hr style="margin:32px 0">
         <?php
     }
 
-    private static function renderPagination(int $page, int $totalPages, int $total): string
+    private static function renderPagination(int $page, int $totalPages, int $total, string $channelFilter = ''): string
     {
-        if ($totalPages <= 1) {
-            return '<p class="description" style="margin-top:8px">' . (int) $total . ' Jobs in letzter 24h.</p>';
-        }
         $base = admin_url('admin.php?page=newss-settings');
+        if ($channelFilter !== '') {
+            $base = add_query_arg('newss_channel', $channelFilter, $base);
+        }
+        if ($totalPages <= 1) {
+            return '<p class="description" style="margin-top:8px">' . (int) $total . ' Jobs in letzter 24h' . ($channelFilter !== '' ? ' (gefiltert)' : '') . '.</p>';
+        }
         $out = '<p style="margin-top:12px;display:flex;align-items:center;gap:8px">';
         if ($page > 1) {
             $out .= sprintf('<a class="button" href="%s">‹ Zurück</a>', esc_url(add_query_arg('newss_page', $page - 1, $base)));
         }
-        $out .= sprintf('<span class="description">Seite %d / %d &nbsp;·&nbsp; %d Jobs gesamt (%d pro Seite)</span>', $page, $totalPages, $total, self::PER_PAGE);
+        $out .= sprintf('<span class="description">Seite %d / %d &nbsp;·&nbsp; %d Jobs gesamt%s (%d pro Seite)</span>', $page, $totalPages, $total, $channelFilter !== '' ? ' im gefilterten Kanal' : '', self::PER_PAGE);
         if ($page < $totalPages) {
             $out .= sprintf('<a class="button" href="%s">Weiter ›</a>', esc_url(add_query_arg('newss_page', $page + 1, $base)));
         }
@@ -313,6 +353,7 @@ final class Status
                 'video_id'   => $videoId,
                 'title'      => self::shorten((string) ($payload['video_title'] ?? ''), 80),
                 'channel'    => (string) ($payload['channel_name'] ?? ''),
+                'channel_id' => (string) ($payload['channel_id'] ?? ''),
                 'scheduled'  => $next ? $next->format('Y-m-d H:i') : '—',
                 'updated'    => $updated,
                 'last_log'   => $lastLog ? self::shorten($lastLog->get_message(), 200) : '',
