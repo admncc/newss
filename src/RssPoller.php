@@ -16,10 +16,15 @@ final class RssPoller
         $stats = ['channels' => 0, 'new' => 0, 'errors' => 0];
         $perChannel = [];
 
+        $first = true;
         foreach ($channels as $channel) {
             if (empty($channel['enabled']) || empty($channel['id'])) {
                 continue;
             }
+            if (!$first) {
+                usleep(1500 * 1000); // 1.5s zwischen Channels — verhindert YT-Drossel
+            }
+            $first = false;
             $stats['channels']++;
             $entry = [
                 'id'    => (string) $channel['id'],
@@ -54,16 +59,34 @@ final class RssPoller
             rawurlencode((string) $channel['id'])
         );
 
-        $response = Http::get($url, [
-            'timeout'    => 30,
-            'user-agent' => 'NewssAutopost/1.0 (+WordPress)',
-        ]);
-
-        if (is_wp_error($response)) {
-            throw new \RuntimeException('RSS fetch failed: ' . $response->get_error_message());
+        $maxAttempts = 3;
+        $response = null;
+        $lastCode = 0;
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $response = Http::get($url, [
+                'timeout'    => 30,
+                'user-agent' => 'NewssAutopost/1.0 (+WordPress)',
+            ]);
+            if (is_wp_error($response)) {
+                if ($attempt < $maxAttempts) {
+                    usleep(1000 * 1000 * $attempt);
+                    continue;
+                }
+                throw new \RuntimeException('RSS fetch failed: ' . $response->get_error_message());
+            }
+            $lastCode = (int) wp_remote_retrieve_response_code($response);
+            if ($lastCode === 200) {
+                break;
+            }
+            // 404 / 500 / 503: wahrscheinlich Proxy-Drossel -> erneut mit anderem Proxy
+            if (($lastCode === 404 || $lastCode >= 500) && $attempt < $maxAttempts) {
+                usleep(1500 * 1000 * $attempt);
+                continue;
+            }
+            throw new \RuntimeException('RSS HTTP ' . $lastCode);
         }
-        if ((int) wp_remote_retrieve_response_code($response) !== 200) {
-            throw new \RuntimeException('RSS HTTP ' . wp_remote_retrieve_response_code($response));
+        if ($lastCode !== 200) {
+            throw new \RuntimeException('RSS HTTP ' . $lastCode . ' nach ' . $maxAttempts . ' Versuchen');
         }
 
         $videos = self::parseFeed((string) wp_remote_retrieve_body($response));
