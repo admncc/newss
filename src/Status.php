@@ -10,40 +10,162 @@ final class Status
 
     public static function renderChannelPoll(): void
     {
-        $last = get_option('newss_last_poll', null);
-        if (!is_array($last) || empty($last['channels'])) {
-            return;
-        }
+        $last         = get_option('newss_last_poll', null);
+        $pollProgress = get_option('newss_poll_progress', null);
+        $hasProgress  = is_array($pollProgress);
+        $hasLast      = is_array($last) && !empty($last['channels']);
+        $ajaxUrl      = admin_url('admin-ajax.php?action=newss_poll_progress');
         ?>
         <h2>Letzte Channel-Polls</h2>
-        <p class="description" style="max-width:880px;margin-bottom:8px">
-            Stand: <strong><?php echo esc_html(wp_date('Y-m-d H:i', (int) $last['time'])); ?></strong>
-            (<?php echo (int) ($last['stats']['new'] ?? 0); ?> neue Videos enqueued, <?php echo (int) ($last['stats']['errors'] ?? 0); ?> Fehler)
-        </p>
-        <table class="widefat striped" style="max-width:880px">
-            <thead>
-                <tr>
-                    <th style="width:30%">Kanal</th>
-                    <th>Channel-ID</th>
-                    <th style="width:80px">Status</th>
-                    <th style="width:80px">Neue Videos</th>
-                    <th>Fehler</th>
-                </tr>
-            </thead>
-            <tbody>
-            <?php foreach ($last['channels'] as $ch): ?>
-                <tr>
-                    <td><strong><?php echo esc_html((string) ($ch['name'] ?? '')); ?></strong></td>
-                    <td><code style="font-size:11px"><?php echo esc_html((string) ($ch['id'] ?? '')); ?></code></td>
-                    <td><?php echo !empty($ch['ok'])
-                        ? '<span style="color:#0a7">✓ OK</span>'
-                        : '<span style="color:#c00">✗ Fehler</span>'; ?></td>
-                    <td><?php echo (int) ($ch['count'] ?? 0); ?></td>
-                    <td style="font-size:11px;color:#c00"><?php echo esc_html((string) ($ch['error'] ?? '')); ?></td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
+
+        <div id="newss-poll-progress-box" style="display:<?php echo $hasProgress ? 'block' : 'none'; ?>;margin:8px 0 16px 0;padding:14px 18px;border:1px solid #2271b1;border-left:4px solid #2271b1;background:#f0f6fc;max-width:880px">
+            <h3 style="margin:0 0 8px 0;font-size:14px" id="newss-progress-heading">⏳ Polling läuft …</h3>
+            <p style="margin:0 0 6px 0"><strong id="newss-progress-text">—</strong></p>
+            <div style="background:#dcdcde;height:10px;border-radius:4px;overflow:hidden">
+                <div id="newss-progress-bar" style="background:#2271b1;height:100%;width:0%;transition:width 0.3s ease"></div>
+            </div>
+            <p id="newss-progress-hint" style="margin:8px 0 0 0;font-size:11px;color:#666">
+                Aktualisiert sich alle 3 Sekunden — kein Page-Reload nötig.
+            </p>
+            <ul id="newss-progress-channels" style="margin:10px 0 0 0;padding:0;list-style:none;font-size:12px;max-height:180px;overflow:auto"></ul>
+        </div>
+
+        <?php if ($hasLast): ?>
+            <p class="description" style="max-width:880px;margin-bottom:8px">
+                Stand: <strong><?php echo esc_html(wp_date('Y-m-d H:i', (int) $last['time'])); ?></strong>
+                (<?php echo (int) ($last['stats']['new'] ?? 0); ?> neue Videos enqueued, <?php echo (int) ($last['stats']['errors'] ?? 0); ?> Fehler)
+            </p>
+            <table class="widefat striped" style="max-width:880px">
+                <thead>
+                    <tr>
+                        <th style="width:30%">Kanal</th>
+                        <th>Channel-ID</th>
+                        <th style="width:80px">Status</th>
+                        <th style="width:80px">Neue Videos</th>
+                        <th>Fehler</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($last['channels'] as $ch): ?>
+                    <tr>
+                        <td><strong><?php echo esc_html((string) ($ch['name'] ?? '')); ?></strong></td>
+                        <td><code style="font-size:11px"><?php echo esc_html((string) ($ch['id'] ?? '')); ?></code></td>
+                        <td><?php echo !empty($ch['ok'])
+                            ? '<span style="color:#0a7">✓ OK</span>'
+                            : '<span style="color:#c00">✗ Fehler</span>'; ?></td>
+                        <td><?php echo (int) ($ch['count'] ?? 0); ?></td>
+                        <td style="font-size:11px;color:#c00"><?php echo esc_html((string) ($ch['error'] ?? '')); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php elseif (!$hasProgress): ?>
+            <div style="margin:8px 0 16px 0;padding:14px 18px;border:1px solid #dcdcde;background:#f6f7f7;max-width:880px">
+                <p style="margin:0">Noch kein Poll-Lauf abgeschlossen. Klick „Jetzt manuell pollen" oben — der Live-Status erscheint dann hier.</p>
+            </div>
+        <?php endif; ?>
+
+        <script>
+        (function(){
+            var box = document.getElementById('newss-poll-progress-box');
+            if (!box) return;
+            var bar     = document.getElementById('newss-progress-bar');
+            var txt     = document.getElementById('newss-progress-text');
+            var hint    = document.getElementById('newss-progress-hint');
+            var heading = document.getElementById('newss-progress-heading');
+            var list    = document.getElementById('newss-progress-channels');
+            var ajaxUrl = <?php echo wp_json_encode($ajaxUrl); ?>;
+            var initiallyRunning = <?php echo $hasProgress ? 'true' : 'false'; ?>;
+            var wasRunning = initiallyRunning;
+            var stopped = false;
+            var pageLoadedAt = Date.now();
+            var IDLE_LIMIT_MS = 5 * 60 * 1000;
+            var timer = null;
+
+            function stop() {
+                stopped = true;
+                if (timer) { clearInterval(timer); timer = null; }
+            }
+
+            function escapeHtml(s) {
+                return String(s).replace(/[&<>"']/g, function(c){
+                    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+                });
+            }
+
+            function renderChannelList(channels) {
+                if (!list) return;
+                list.innerHTML = '';
+                channels.forEach(function(c){
+                    var li = document.createElement('li');
+                    li.style.cssText = 'padding:3px 0;border-bottom:1px dotted #dcdcde';
+                    var icon = c.ok ? '<span style="color:#0a7">✓</span>' :
+                               (c.error ? '<span style="color:#c00">✗</span>' : '<span style="color:#888">·</span>');
+                    var info = c.error
+                        ? '<span style="color:#c00">' + escapeHtml(c.error) + '</span>'
+                        : (c.count + ' neue Videos');
+                    li.innerHTML = icon + ' <strong>' + escapeHtml(c.name) + '</strong> — ' + info;
+                    list.appendChild(li);
+                });
+            }
+
+            function showRunning(p) {
+                box.style.display = 'block';
+                box.style.background = '#f0f6fc';
+                box.style.borderColor = '#2271b1';
+                heading.textContent = '⏳ Polling läuft …';
+                bar.style.background = '#2271b1';
+                var pct = p.total > 0 ? Math.round(p.done / p.total * 100) : 0;
+                bar.style.width = pct + '%';
+                txt.textContent = 'Kanal ' + p.done + ' / ' + p.total +
+                    (p.current ? ' — gerade: ' + p.current : '');
+                hint.innerHTML = 'Aktualisiert sich alle 3 Sekunden — kein Page-Reload nötig.';
+                renderChannelList(p.channels || []);
+            }
+
+            function showFinished() {
+                box.style.display = 'block';
+                heading.textContent = '✓ Polling abgeschlossen';
+                box.style.background = '#eaf7e6';
+                box.style.borderColor = '#0a7';
+                bar.style.width = '100%';
+                bar.style.background = '#0a7';
+                txt.textContent = 'Alle Kanäle verarbeitet.';
+                hint.innerHTML = '<a href="' + window.location.href + '">Seite jetzt neu laden</a> um die aktualisierte Tabelle zu sehen.';
+            }
+
+            function tick() {
+                if (stopped) return;
+                fetch(ajaxUrl, {credentials: 'same-origin', cache: 'no-store'})
+                    .then(function(r){ return r.ok ? r.json() : null; })
+                    .then(function(d){
+                        if (!d) return;
+                        if (d.in_progress && d.progress) {
+                            wasRunning = true;
+                            showRunning(d.progress);
+                        } else if (wasRunning) {
+                            showFinished();
+                            stop();
+                        } else {
+                            box.style.display = 'none';
+                            // Keine running session und nie gelaufen seit Page-Load.
+                            // Idle-Polling fortsetzen — aber max IDLE_LIMIT_MS,
+                            // damit ein frisch enqueueter Poll noch erscheinen kann.
+                            if (Date.now() - pageLoadedAt > IDLE_LIMIT_MS) {
+                                stop();
+                            }
+                        }
+                    })
+                    .catch(function(){ /* network blip — beim nächsten Tick erneut */ });
+            }
+
+            tick();
+            timer = setInterval(tick, 3000);
+            // Sicherheits-Stop nach 30 Min auch im running-Fall
+            setTimeout(stop, 30 * 60 * 1000);
+        })();
+        </script>
+
         <hr style="margin:32px 0">
         <?php
     }
