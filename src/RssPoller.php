@@ -55,11 +55,17 @@ final class RssPoller
     private static function pollChannel(array $channel): int
     {
         $channelId = (string) $channel['id'];
-        $apiKey    = trim((string) get_option('newss_youtube_api_key', ''));
+        $method    = (string) get_option('newss_youtube_method', 'rss');
 
-        $videos = $apiKey !== ''
-            ? self::fetchViaApi($channelId, $apiKey)
-            : self::fetchViaRss($channelId);
+        if ($method === 'api') {
+            $apiKey = trim((string) get_option('newss_youtube_api_key', ''));
+            if ($method === 'api' && $apiKey === '') {
+                throw new \RuntimeException('Methode = API gewählt, aber API-Key ist leer');
+            }
+            $videos = self::fetchViaApi($channelId, $apiKey);
+        } else {
+            $videos = self::fetchViaRss($channelId);
+        }
 
         $enqueued = 0;
         foreach ($videos as $video) {

@@ -17,6 +17,7 @@ $options = [
     'newss_youtube_proxy',
     'newss_youtube_cookie',
     'newss_youtube_api_key',
+    'newss_youtube_method',
     'newss_supadata_api_key',
     'newss_ytdlp_path',
     'newss_whisper_enabled',

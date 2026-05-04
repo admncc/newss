@@ -176,6 +176,10 @@ final class Settings
             'default'           => '',
             'autoload'          => false,
         ]);
+        register_setting(self::OPTION_GROUP, 'newss_youtube_method', [
+            'sanitize_callback' => [self::class, 'sanitizeYoutubeMethod'],
+            'default'           => 'rss',
+        ]);
 
         $opts = [
             'newss_anthropic_model'        => 'sanitize_text_field',
@@ -215,6 +219,11 @@ final class Settings
     public static function sanitizeStatus($value): string
     {
         return in_array($value, ['publish', 'draft'], true) ? $value : 'publish';
+    }
+
+    public static function sanitizeYoutubeMethod($value): string
+    {
+        return in_array($value, ['api', 'rss'], true) ? $value : 'rss';
     }
 
     public static function sanitizeBlockedTopics($value): array
@@ -399,45 +408,81 @@ final class Settings
                     </tr>
                 </table>
 
-                <h2>YouTube-Zugriff (Proxy-Rotation)</h2>
+                <h2>YouTube-Zugriff</h2>
+                <?php $ytMethod = (string) get_option('newss_youtube_method', 'rss'); ?>
                 <table class="form-table" role="presentation">
                     <tr>
-                        <th scope="row"><label for="newss_youtube_api_key">YouTube Data API Key</label></th>
+                        <th scope="row">Methode</th>
                         <td>
-                            <input type="password" id="newss_youtube_api_key" name="newss_youtube_api_key" value="<?php echo esc_attr((string) get_option('newss_youtube_api_key', '')); ?>" class="regular-text" autocomplete="off">
-                            <p class="description">
-                                <strong>Empfohlen.</strong> Wenn gesetzt, werden Channel-Updates über die offizielle <code>playlistItems.list</code>-API geholt — ~1 Quota-Unit pro Channel-Poll, 10.000 Free pro Tag.
-                                Wesentlich zuverlässiger als der RSS-Feed (kein Rate-Limit, keine Proxy-Drossel).<br>
-                                Key erstellen: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">console.cloud.google.com/apis/credentials</a> → Create API Key → bei „YouTube Data API v3" aktivieren.<br>
-                                Leer lassen = Fallback auf RSS-Feed (mit Proxy + Retry).
-                            </p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="newss_youtube_proxy">Proxy-Liste</label></th>
-                        <td>
-                            <textarea id="newss_youtube_proxy" name="newss_youtube_proxy" rows="6" class="large-text code" placeholder="host:port:user:pass&#10;http://user:pass@host:port&#10;socks5://host:port&#10;# Eine Zeile pro Proxy. Bei mehreren wird per Request randomisiert rotiert."><?php echo esc_textarea($youtubeProxy); ?></textarea>
-                            <p class="description">
-                                Eine Zeile pro Proxy. Akzeptierte Formate:<br>
-                                <code>host:port:user:pass</code> &nbsp;|&nbsp; <code>http://user:pass@host:port</code> &nbsp;|&nbsp; <code>socks5://host:port</code><br>
-                                Bei mehreren Einträgen wird pro Request randomisiert einer gewählt.
-                                Wird nur für YouTube-RSS und Channel-Resolver genutzt — Anthropic und Supadata gehen direkt.
-                                Leer lassen = kein Proxy.
-                            </p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><label for="newss_youtube_cookie">Consent-Cookie</label></th>
-                        <td>
-                            <input type="text" id="newss_youtube_cookie" name="newss_youtube_cookie" value="<?php echo esc_attr((string) get_option('newss_youtube_cookie', \Newss\Http::DEFAULT_YT_COOKIE)); ?>" class="large-text code" placeholder="<?php echo esc_attr(\Newss\Http::DEFAULT_YT_COOKIE); ?>">
-                            <p class="description">
-                                Wird bei DE-/EU-IPs gebraucht damit YouTube nicht die Consent-Wall serviert.
-                                Default funktioniert seit 2021; falls YouTube den irgendwann invalidiert hier neuen Wert eintragen.
-                                Leer = kein Cookie senden.
-                            </p>
+                            <label style="display:block;margin-bottom:6px">
+                                <input type="radio" name="newss_youtube_method" value="api" <?php checked($ytMethod, 'api'); ?> onchange="newssToggleYtMethod()">
+                                <strong>YouTube Data API</strong> — empfohlen, zuverlässig, Free-Tier (10.000 Units/Tag)
+                            </label>
+                            <label style="display:block">
+                                <input type="radio" name="newss_youtube_method" value="rss" <?php checked($ytMethod, 'rss'); ?> onchange="newssToggleYtMethod()">
+                                <strong>RSS-Feed mit Proxy</strong> — Fallback, funktioniert ohne Google-Account, anfällig für Drossel
+                            </label>
                         </td>
                     </tr>
                 </table>
+
+                <div id="newss-yt-api-section">
+                    <h3 style="margin:18px 0 6px">YouTube Data API</h3>
+                    <table class="form-table" role="presentation">
+                        <tr>
+                            <th scope="row"><label for="newss_youtube_api_key">API-Key</label></th>
+                            <td>
+                                <input type="password" id="newss_youtube_api_key" name="newss_youtube_api_key" value="<?php echo esc_attr((string) get_option('newss_youtube_api_key', '')); ?>" class="regular-text" autocomplete="off">
+                                <p class="description">
+                                    Key erstellen: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">console.cloud.google.com/apis/credentials</a>
+                                    → Create API Key → YouTube Data API v3 aktivieren. Optional auf Server-IP einschränken.
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div id="newss-yt-rss-section">
+                    <h3 style="margin:18px 0 6px">RSS-Feed mit Proxy-Rotation</h3>
+                    <table class="form-table" role="presentation">
+                        <tr>
+                            <th scope="row"><label for="newss_youtube_proxy">Proxy-Liste</label></th>
+                            <td>
+                                <textarea id="newss_youtube_proxy" name="newss_youtube_proxy" rows="6" class="large-text code" placeholder="host:port:user:pass&#10;http://user:pass@host:port&#10;socks5://host:port&#10;# Eine Zeile pro Proxy. Bei mehreren wird per Request randomisiert rotiert."><?php echo esc_textarea($youtubeProxy); ?></textarea>
+                                <p class="description">
+                                    Eine Zeile pro Proxy. Akzeptierte Formate:<br>
+                                    <code>host:port:user:pass</code> &nbsp;|&nbsp; <code>http://user:pass@host:port</code> &nbsp;|&nbsp; <code>socks5://host:port</code><br>
+                                    Bei mehreren Einträgen wird pro Request randomisiert einer gewählt.
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="newss_youtube_cookie">Consent-Cookie</label></th>
+                            <td>
+                                <input type="text" id="newss_youtube_cookie" name="newss_youtube_cookie" value="<?php echo esc_attr((string) get_option('newss_youtube_cookie', \Newss\Http::DEFAULT_YT_COOKIE)); ?>" class="large-text code" placeholder="<?php echo esc_attr(\Newss\Http::DEFAULT_YT_COOKIE); ?>">
+                                <p class="description">
+                                    Wird bei DE-/EU-IPs gebraucht damit YouTube nicht die Consent-Wall serviert.
+                                    Default funktioniert seit 2021. Leer = kein Cookie senden.
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <script>
+                function newssToggleYtMethod() {
+                    var m = document.querySelector('input[name="newss_youtube_method"]:checked');
+                    if (!m) return;
+                    var api = document.getElementById('newss-yt-api-section');
+                    var rss = document.getElementById('newss-yt-rss-section');
+                    var apiActive = m.value === 'api';
+                    api.style.opacity = apiActive ? '1' : '0.4';
+                    api.style.pointerEvents = apiActive ? 'auto' : 'none';
+                    rss.style.opacity = apiActive ? '0.4' : '1';
+                    rss.style.pointerEvents = apiActive ? 'none' : 'auto';
+                }
+                document.addEventListener('DOMContentLoaded', newssToggleYtMethod);
+                </script>
 
                 <h2>Transkript-Quelle</h2>
                 <p class="description" style="max-width:780px;margin-bottom:8px">
