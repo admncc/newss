@@ -200,6 +200,168 @@ final class Status
         <?php
     }
 
+    /**
+     * Live-Daten fuer aktuell laufende Pipeline-Jobs (Worker-Stage).
+     *
+     * @return array{running:array<int,array<string,mixed>>, pending:int, failed:int, ts:int}
+     */
+    public static function pipelineLiveData(): array
+    {
+        $out = ['running' => [], 'pending' => 0, 'failed' => 0, 'ts' => time()];
+        if (!class_exists('\\ActionScheduler')) {
+            return $out;
+        }
+        try {
+            $store = \ActionScheduler::store();
+            $runningIds = (array) $store->query_actions([
+                'hook'     => Worker::HOOK_PROCESS,
+                'group'    => 'newss',
+                'status'   => 'in-progress',
+                'per_page' => 20,
+                'order'    => 'ASC',
+                'orderby'  => 'date',
+            ]);
+            $out['pending'] = (int) $store->query_actions([
+                'hook'   => Worker::HOOK_PROCESS,
+                'group'  => 'newss',
+                'status' => 'pending',
+            ], 'count');
+            // Failed nur letzte 24h zaehlen, sonst sammelt sich das ueber Wochen
+            $since24h = new \DateTime('24 hours ago', new \DateTimeZone('UTC'));
+            $out['failed'] = (int) $store->query_actions([
+                'hook'         => Worker::HOOK_PROCESS,
+                'group'        => 'newss',
+                'status'       => 'failed',
+                'date'         => $since24h,
+                'date_compare' => '>=',
+            ], 'count');
+
+            if ($runningIds === []) {
+                return $out;
+            }
+
+            $logsMap = self::lookupLogsByActionIds(array_map('intval', $runningIds));
+            $createdMap = self::lookupCreatedDates(array_map('intval', $runningIds));
+
+            foreach ($runningIds as $aid) {
+                $aid = (int) $aid;
+                try {
+                    $action = $store->fetch_action($aid);
+                } catch (\Throwable) {
+                    continue;
+                }
+                if (!$action) continue;
+                $args = $action->get_args();
+                $payload = $args[0] ?? [];
+                $logs = $logsMap[$aid] ?? [];
+                $lastLog = $logs ? end($logs) : null;
+                $startedTs = 0;
+                if (isset($createdMap[$aid])) {
+                    try {
+                        $startedTs = (new \DateTime($createdMap[$aid], new \DateTimeZone('UTC')))->getTimestamp();
+                    } catch (\Throwable) {}
+                }
+                $out['running'][] = [
+                    'action_id'   => $aid,
+                    'video_id'    => (string) ($payload['video_id'] ?? ''),
+                    'video_title' => self::shorten((string) ($payload['video_title'] ?? ''), 80),
+                    'channel'     => (string) ($payload['channel_name'] ?? ''),
+                    'started_ts'  => $startedTs,
+                    'started_ago' => $startedTs > 0 ? self::timeAgoDe($startedTs) : '—',
+                    'last_log'    => $lastLog ? self::shorten((string) ($lastLog['message'] ?? ''), 140) : '',
+                ];
+            }
+        } catch (\Throwable $e) {
+            error_log('[newss] pipelineLiveData error: ' . $e->getMessage());
+        }
+        return $out;
+    }
+
+    public static function renderPipelineLive(): void
+    {
+        $ajaxUrl = admin_url('admin-ajax.php?action=newss_pipeline_live');
+        ?>
+        <div id="newss-pipeline-live" style="margin:8px 0 20px 0;padding:14px 18px;border:1px solid #dcdcde;border-left:4px solid #999;background:#f6f7f7;max-width:1280px">
+            <h3 style="margin:0 0 8px 0;font-size:14px" id="newss-pl-heading">○ Aktuell keine laufenden Jobs</h3>
+            <p style="margin:0 0 8px 0;font-size:12px;color:#666" id="newss-pl-counts">—</p>
+            <ul id="newss-pl-list" style="margin:0;padding:0;list-style:none;font-size:12px;max-height:280px;overflow:auto"></ul>
+            <p style="margin:8px 0 0 0;font-size:11px;color:#999">Aktualisiert sich alle 4 Sekunden — kein Page-Reload nötig.</p>
+        </div>
+        <script>
+        (function(){
+            var box = document.getElementById('newss-pipeline-live');
+            if (!box) return;
+            var heading = document.getElementById('newss-pl-heading');
+            var counts  = document.getElementById('newss-pl-counts');
+            var list    = document.getElementById('newss-pl-list');
+            var ajaxUrl = <?php echo wp_json_encode($ajaxUrl); ?>;
+            var stopped = false;
+            var idleTicks = 0;
+            var IDLE_MAX_TICKS = 75; // 75 * 4s = 5 min ohne running -> stop
+
+            function escapeHtml(s){
+                return String(s).replace(/[&<>"']/g, function(c){
+                    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+                });
+            }
+
+            function tick(){
+                if (stopped) return;
+                fetch(ajaxUrl, {credentials:'same-origin', cache:'no-store'})
+                    .then(function(r){ return r.ok ? r.json() : null; })
+                    .then(function(d){
+                        if (!d) return;
+                        var running = d.running || [];
+                        var pending = d.pending || 0;
+                        var failed  = d.failed || 0;
+
+                        if (running.length > 0) {
+                            idleTicks = 0;
+                            box.style.background = '#f0f6fc';
+                            box.style.borderLeftColor = '#2271b1';
+                            heading.textContent = '⏳ ' + running.length + ' Job' + (running.length === 1 ? '' : 's') + ' laufen gerade';
+                        } else {
+                            idleTicks++;
+                            box.style.background = '#f6f7f7';
+                            box.style.borderLeftColor = '#999';
+                            heading.textContent = '○ Aktuell keine laufenden Jobs';
+                        }
+                        counts.textContent = pending + ' Pending · ' + failed + ' Failed (24h)';
+
+                        list.innerHTML = '';
+                        running.forEach(function(j){
+                            var li = document.createElement('li');
+                            li.style.cssText = 'padding:8px 10px;margin:6px 0;background:#fff;border:1px solid #dcdcde;border-radius:3px';
+                            li.innerHTML =
+                                '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">' +
+                                  '<strong>' + escapeHtml(j.video_title || j.video_id) + '</strong>' +
+                                  '<span style="font-size:11px;color:#666;white-space:nowrap">' + escapeHtml(j.started_ago) + '</span>' +
+                                '</div>' +
+                                '<div style="font-size:11px;color:#666;margin-top:2px">' +
+                                  escapeHtml(j.channel) +
+                                  ' · <a href="https://www.youtube.com/watch?v=' + encodeURIComponent(j.video_id) + '" target="_blank" rel="noopener">' + escapeHtml(j.video_id) + '</a>' +
+                                '</div>' +
+                                (j.last_log
+                                  ? '<div style="font-size:11px;color:#0040b0;margin-top:4px;font-family:monospace">' + escapeHtml(j.last_log) + '</div>'
+                                  : '');
+                            list.appendChild(li);
+                        });
+
+                        if (idleTicks > IDLE_MAX_TICKS) {
+                            stopped = true;
+                        }
+                    })
+                    .catch(function(){ /* network blip */ });
+            }
+            tick();
+            var timer = setInterval(tick, 4000);
+            // Hard-Stop nach 30 Min damit der Tab nicht ewig pollt
+            setTimeout(function(){ stopped = true; clearInterval(timer); }, 30 * 60 * 1000);
+        })();
+        </script>
+        <?php
+    }
+
     public static function renderPipeline(): void
     {
         if (!function_exists('as_get_scheduled_actions') || !class_exists('\\ActionScheduler')) {
@@ -250,6 +412,7 @@ final class Status
         ];
         ?>
         <h2>Job-Pipeline (letzte 24h)</h2>
+        <?php self::renderPipelineLive(); ?>
         <p class="description" style="max-width:1280px;margin-bottom:8px">
             <?php foreach ($statusCounts as $key => $count): ?>
                 <span style="margin-right:14px"><strong><?php echo esc_html($statsLabels[$key] ?? $key); ?>:</strong> <?php echo (int) $count; ?></span>
@@ -323,8 +486,8 @@ final class Status
                 <?php foreach ($rows as $r): ?>
                     <tr>
                         <td><?php echo self::statusBadge($r['effective']); ?></td>
-                        <td style="font-size:11px"><?php echo esc_html($r['created'] ?: '—'); echo !empty($r['created_ts']) ? '<br><span style="color:#999">' . esc_html(human_time_diff((int) $r['created_ts']) . ' her') . '</span>' : ''; ?></td>
-                        <td style="font-size:11px"><?php echo esc_html($r['updated'] ?: '—'); echo !empty($r['updated_ts']) ? '<br><span style="color:#999">' . esc_html(human_time_diff((int) $r['updated_ts']) . ' her') . '</span>' : ''; ?></td>
+                        <td style="font-size:11px"><?php echo esc_html($r['created'] ?: '—'); echo !empty($r['created_ts']) ? '<br><span style="color:#999">' . esc_html(self::timeAgoDe((int) $r['created_ts'])) . '</span>' : ''; ?></td>
+                        <td style="font-size:11px"><?php echo esc_html($r['updated'] ?: '—'); echo !empty($r['updated_ts']) ? '<br><span style="color:#999">' . esc_html(self::timeAgoDe((int) $r['updated_ts'])) . '</span>' : ''; ?></td>
                         <td>
                             <strong><?php echo esc_html($r['title']); ?></strong><br>
                             <a href="https://www.youtube.com/watch?v=<?php echo esc_attr($r['video_id']); ?>" target="_blank" rel="noopener" style="font-size:11px"><?php echo esc_html($r['video_id']); ?></a>
@@ -386,6 +549,29 @@ final class Status
     }
 
     public const STATUS_COUNTS_CACHE_KEY = 'newss_status_counts';
+
+    /**
+     * Liefert "vor X Min./Std./Tagen" auf Deutsch.
+     * Ersetzt WP's human_time_diff das je nach Locale englisch ausgibt.
+     */
+    public static function timeAgoDe(int $ts): string
+    {
+        if ($ts <= 0) {
+            return '—';
+        }
+        $diff = abs(time() - $ts);
+        if ($diff < 60) {
+            return $diff . ' Sek. her';
+        }
+        if ($diff < 3600) {
+            return (int) round($diff / 60) . ' Min. her';
+        }
+        if ($diff < 86400) {
+            return (int) round($diff / 3600) . ' Std. her';
+        }
+        $days = (int) round($diff / 86400);
+        return $days . ($days === 1 ? ' Tag her' : ' Tage her');
+    }
 
     /**
      * Onboarding-Checkliste. Zeigt nur an wenn Setup unvollständig.
@@ -525,7 +711,7 @@ final class Status
                 'label'  => 'Cron läuft',
                 'detail' => $cronAge < 0
                     ? 'noch nie gelaufen'
-                    : (human_time_diff($lastCron) . ' her'),
+                    : self::timeAgoDe($lastCron),
                 'ok'     => $cronAge >= 0 && $cronAge < 12 * HOUR_IN_SECONDS,
                 'warn'   => $cronAge >= 12 * HOUR_IN_SECONDS && $cronAge < 16 * HOUR_IN_SECONDS,
             ],

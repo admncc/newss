@@ -27,6 +27,15 @@ final class Settings
         add_action('admin_post_newss_test_youtube', [self::class, 'handleTestYoutube']);
         add_action('admin_post_newss_test_supadata', [self::class, 'handleTestSupadata']);
         add_action('wp_ajax_newss_poll_progress', [self::class, 'handleAjaxPollProgress']);
+        add_action('wp_ajax_newss_pipeline_live', [self::class, 'handleAjaxPipelineLive']);
+    }
+
+    public static function handleAjaxPipelineLive(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Forbidden'], 403);
+        }
+        wp_send_json(Status::pipelineLiveData());
     }
 
     public static function handleTestAnthropic(): void
@@ -591,7 +600,7 @@ final class Settings
                 <tr><th>Letzter Cron-Lauf</th><td>
                     <?php if ($lastCron > 0): ?>
                         <span style="color:<?php echo esc_attr($cronColor); ?>">
-                            <?php echo esc_html(human_time_diff($lastCron) . ' her'); ?>
+                            <?php echo esc_html(Status::timeAgoDe($lastCron)); ?>
                         </span>
                         <span style="color:#999">(<?php echo esc_html(self::formatTime($lastCron)); ?>)</span>
                         <?php if ($cronAge > 16 * HOUR_IN_SECONDS): ?>
@@ -605,9 +614,9 @@ final class Settings
                     if (is_array($lastPoll)) {
                         $s = $lastPoll['stats'];
                         printf(
-                            '%s (%s her) — Kanäle: %d, neue Videos: %d, Fehler: %d',
+                            '%s (%s) — Kanäle: %d, neue Videos: %d, Fehler: %d',
                             esc_html(self::formatTime((int) $lastPoll['time'])),
-                            esc_html(human_time_diff((int) $lastPoll['time'])),
+                            esc_html(Status::timeAgoDe((int) $lastPoll['time'])),
                             (int) $s['channels'], (int) $s['new'], (int) $s['errors']
                         );
                     } else { echo '—'; }
@@ -645,7 +654,7 @@ final class Settings
                     <tr>
                         <td><strong><?php echo esc_html($label); ?></strong></td>
                         <td><?php echo $okBadge; ?></td>
-                        <td style="font-size:11px"><?php echo esc_html(human_time_diff((int) ($h['ts'] ?? 0)) . ' her'); ?></td>
+                        <td style="font-size:11px"><?php echo esc_html(Status::timeAgoDe((int) ($h['ts'] ?? 0))); ?></td>
                         <td style="font-size:11px"><?php echo esc_html((string) ($h['note'] ?? '')); ?></td>
                     </tr>
                 <?php endforeach; ?>
