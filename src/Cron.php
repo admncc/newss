@@ -7,13 +7,17 @@ namespace Newss;
 final class Cron
 {
     public const HOOK_PERIODIC = 'newss_cron_periodic';
-    public const SCHEDULE_NAME = 'newss_8hours';
+    public const SCHEDULE_NAME = 'newss_3hours';
 
     private const LEGACY_HOOKS = [
         'newss_cron_morning',
         'newss_cron_evening',
         'newss_cron_hourly',
         'newss_cron_daily',
+    ];
+
+    private const LEGACY_SCHEDULES = [
+        'newss_8hours',
     ];
 
     public static function register(): void
@@ -28,8 +32,8 @@ final class Cron
     {
         if (!isset($schedules[self::SCHEDULE_NAME])) {
             $schedules[self::SCHEDULE_NAME] = [
-                'interval' => 8 * HOUR_IN_SECONDS,
-                'display'  => 'Alle 8 Stunden (Newss)',
+                'interval' => 3 * HOUR_IN_SECONDS,
+                'display'  => 'Alle 3 Stunden (Newss)',
             ];
         }
         return $schedules;
@@ -44,7 +48,8 @@ final class Cron
         }
 
         $current = wp_get_scheduled_event(self::HOOK_PERIODIC);
-        if ($current && $current->schedule !== self::SCHEDULE_NAME) {
+        if ($current && ($current->schedule !== self::SCHEDULE_NAME
+                         || in_array($current->schedule, self::LEGACY_SCHEDULES, true))) {
             wp_clear_scheduled_hook(self::HOOK_PERIODIC);
             $current = false;
         }
@@ -53,7 +58,7 @@ final class Cron
             $tz = wp_timezone();
             $now = new \DateTimeImmutable('now', $tz);
             $hour = (int) $now->format('H');
-            $nextHour = ((int) ceil(($hour + 1) / 8)) * 8;
+            $nextHour = ((int) ceil(($hour + 1) / 3)) * 3;
             if ($nextHour >= 24) {
                 $target = $now->modify('+1 day')->setTime(0, 0, 0);
             } else {

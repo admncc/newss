@@ -427,7 +427,7 @@ final class Settings
 
         error_log('[newss] handleRunNow: detached, calling pollAll() now');
         // pollAll direkt aufrufen statt via Action-Scheduler.
-        // Grund: bei DISABLE_WP_CRON=true triggert AS nur alle 8h (System-Cron),
+        // Grund: bei DISABLE_WP_CRON=true triggert AS nur per System-Cron-Tick,
         // d.h. as_enqueue_async_action laesst den Job in der Queue liegen.
         // Direkter Call ist deterministisch und blockt den User nicht
         // (wir sind nach detach in einem detached PHP-Prozess).
@@ -582,7 +582,7 @@ final class Settings
                 <tbody>
                 <tr><th>yt-dlp</th><td><?php echo $ytDlpFound ? '<span style="color:#0a7">gefunden</span>' : '<span style="color:#c00">nicht gefunden</span>'; ?> (<code><?php echo esc_html($ytdlp); ?></code>)</td></tr>
                 <tr><th>ffmpeg</th><td><?php echo $ffmpegFound ? '<span style="color:#0a7">gefunden</span>' : '<span style="color:#c00">nicht gefunden</span>'; ?></td></tr>
-                <tr><th>Nächster Lauf (alle 8h, 3× täglich)</th><td><?php echo $nextRun ? esc_html(self::formatTime($nextRun)) : '—'; ?></td></tr>
+                <tr><th>Nächster Lauf (alle 3h, 8× täglich)</th><td><?php echo $nextRun ? esc_html(self::formatTime($nextRun)) : '—'; ?></td></tr>
                 <?php
                 $lastCron = (int) get_option('newss_last_cron_run', 0);
                 $cronAge = $lastCron > 0 ? time() - $lastCron : -1;
@@ -656,7 +656,7 @@ final class Settings
 
             <p style="background:#fff8e1;border-left:4px solid #ffb900;padding:8px 12px;max-width:780px">
                 <strong>Empfehlung:</strong> Trag auf dem Server diesen System-Cron ein und deaktiviere WP-Cron in <code>wp-config.php</code>:<br>
-                <code>0 */8 * * * curl -s <?php echo esc_html(home_url('/wp-cron.php?doing_wp_cron')); ?> &gt; /dev/null</code><br>
+                <code>0 */3 * * * curl -s <?php echo esc_html(home_url('/wp-cron.php?doing_wp_cron')); ?> &gt; /dev/null</code><br>
                 <code>define('DISABLE_WP_CRON', true);</code>
             </p>
 
