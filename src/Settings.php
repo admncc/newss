@@ -266,12 +266,18 @@ final class Settings
                 $flag = sanitize_key(wp_unslash((string) $_GET['ran'])); ?>
                 <div class="notice notice-success is-dismissible">
                     <?php if ($flag === 'queued'): ?>
-                        <p>RSS-Polling wurde in die Hintergrund-Queue gelegt — läuft asynchron. Reload in ~30–90 Sekunden für aktualisierten Status.</p>
+                        <p>RSS-Polling wurde in die Hintergrund-Queue gelegt — läuft asynchron. Status oben aktualisiert sich live.</p>
                     <?php else: ?>
                         <p>RSS-Polling wurde ausgeführt.</p>
                     <?php endif; ?>
                 </div>
             <?php endif; ?>
+
+            <?php
+            Status::renderOnboarding();
+            Status::renderHealthTiles();
+            Status::renderKpiTiles();
+            ?>
 
             <h2>Server-Status</h2>
             <table class="widefat striped" style="max-width:780px">

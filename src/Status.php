@@ -205,6 +205,208 @@ final class Status
 
     public const STATUS_COUNTS_CACHE_KEY = 'newss_status_counts';
 
+    /**
+     * Onboarding-Checkliste. Zeigt nur an wenn Setup unvollständig.
+     */
+    public static function renderOnboarding(): void
+    {
+        $missing = self::onboardingChecklist();
+        if ($missing === []) {
+            return;
+        }
+        ?>
+        <div style="margin:16px 0;padding:14px 18px;border:1px solid #ffb900;border-left:4px solid #ffb900;background:#fff8e1;max-width:880px">
+            <h2 style="margin:0 0 8px 0">⚙ Setup nicht abgeschlossen</h2>
+            <p style="margin:0 0 8px 0">Folgende Schritte fehlen noch bis das Plugin Artikel produziert:</p>
+            <ol style="margin:0 0 0 18px">
+                <?php foreach ($missing as $item): ?>
+                    <li style="margin-bottom:4px">
+                        <strong><?php echo esc_html($item['label']); ?></strong>
+                        — <a href="<?php echo esc_url(admin_url('admin.php?page=' . $item['page'])); ?>"><?php echo esc_html($item['cta']); ?></a>
+                    </li>
+                <?php endforeach; ?>
+            </ol>
+        </div>
+        <?php
+    }
+
+    /**
+     * Kompakte Health-Tiles oben auf der Status-Page.
+     */
+    public static function renderHealthTiles(): void
+    {
+        $checks = self::healthChecks();
+        ?>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin:16px 0;max-width:880px">
+            <?php foreach ($checks as $c):
+                $bg = $c['ok'] ? '#eaf7e6' : ($c['warn'] ? '#fff8e1' : '#ffe6e6');
+                $color = $c['ok'] ? '#0a5a00' : ($c['warn'] ? '#7a5b00' : '#7a0000');
+                $icon = $c['ok'] ? '✓' : ($c['warn'] ? '⚠' : '✗');
+                ?>
+                <div style="flex:1 1 200px;min-width:180px;padding:12px;background:<?php echo esc_attr($bg); ?>;color:<?php echo esc_attr($color); ?>;border-radius:4px;font-size:13px">
+                    <div style="font-size:16px;font-weight:600"><?php echo $icon; ?> <?php echo esc_html($c['label']); ?></div>
+                    <div style="margin-top:4px;font-size:11px;color:#666"><?php echo esc_html($c['detail']); ?></div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <?php
+    }
+
+    /**
+     * KPI-Kacheln: schnelle Zahlen.
+     */
+    public static function renderKpiTiles(): void
+    {
+        $kpis = self::computeKpis();
+        ?>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0;max-width:1080px">
+            <?php foreach ($kpis as $k): ?>
+                <div style="padding:12px 14px;background:#fff;border:1px solid #dcdcde;border-radius:4px">
+                    <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px"><?php echo esc_html($k['label']); ?></div>
+                    <div style="font-size:24px;font-weight:600;margin-top:4px;color:<?php echo esc_attr($k['color'] ?? '#1d2327'); ?>"><?php echo esc_html((string) $k['value']); ?></div>
+                    <?php if (!empty($k['sub'])): ?>
+                        <div style="font-size:11px;color:#999;margin-top:2px"><?php echo esc_html($k['sub']); ?></div>
+                    <?php endif; ?>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <?php
+    }
+
+    private static function onboardingChecklist(): array
+    {
+        $missing = [];
+        if (trim((string) get_option('newss_anthropic_api_key', '')) === '') {
+            $missing[] = ['label' => 'Anthropic-API-Key fehlt', 'cta' => 'In Claude-Settings setzen', 'page' => 'newss-claude'];
+        }
+        $hasSupa    = trim((string) get_option('newss_supadata_api_key', '')) !== '';
+        $hasWhisper = (int) get_option('newss_whisper_enabled', 0) === 1
+                   && trim((string) get_option('newss_whisper_api_key', '')) !== '';
+        $hasYtdlp   = self::isYtDlpAvailable();
+        if (!$hasSupa && !$hasWhisper && !$hasYtdlp) {
+            $missing[] = ['label' => 'Kein Transkript-Provider konfiguriert', 'cta' => 'Supadata oder Whisper aktivieren', 'page' => 'newss-transcript'];
+        }
+        $method = (string) get_option('newss_youtube_method', 'rss');
+        if ($method === 'api' && trim((string) get_option('newss_youtube_api_key', '')) === '') {
+            $missing[] = ['label' => 'YouTube Data API-Key fehlt (Methode = API gewählt)', 'cta' => 'API-Key setzen', 'page' => 'newss-youtube'];
+        }
+        $channels = (array) get_option('newss_channels', []);
+        $enabledCount = 0;
+        foreach ($channels as $c) {
+            if (!empty($c['enabled'])) $enabledCount++;
+        }
+        if ($enabledCount === 0) {
+            $missing[] = ['label' => 'Kein aktiver Kanal', 'cta' => 'Kanal hinzufügen', 'page' => 'newss-channels'];
+        }
+        return $missing;
+    }
+
+    private static function healthChecks(): array
+    {
+        $hasAnthropic = trim((string) get_option('newss_anthropic_api_key', '')) !== '';
+        $channels = (array) get_option('newss_channels', []);
+        $enabledChannels = array_filter($channels, static fn($c) => !empty($c['enabled']));
+        $hasChannel = $enabledChannels !== [];
+        $hasSupa    = trim((string) get_option('newss_supadata_api_key', '')) !== '';
+        $hasWhisper = (int) get_option('newss_whisper_enabled', 0) === 1
+                   && trim((string) get_option('newss_whisper_api_key', '')) !== '';
+        $hasYtdlp   = self::isYtDlpAvailable();
+        $hasProvider = $hasSupa || $hasWhisper || $hasYtdlp;
+
+        $lastCron = (int) get_option('newss_last_cron_run', 0);
+        $cronAge  = $lastCron > 0 ? time() - $lastCron : -1;
+
+        return [
+            [
+                'label'  => 'Claude konfiguriert',
+                'detail' => $hasAnthropic ? 'API-Key gesetzt' : 'kein API-Key',
+                'ok'     => $hasAnthropic,
+                'warn'   => false,
+            ],
+            [
+                'label'  => 'Transkript-Provider',
+                'detail' => trim(implode(', ', array_filter([
+                    $hasSupa ? 'Supadata' : '',
+                    $hasYtdlp ? 'yt-dlp' : '',
+                    $hasWhisper ? 'Whisper' : '',
+                ]))) ?: 'kein Provider',
+                'ok'     => $hasProvider,
+                'warn'   => false,
+            ],
+            [
+                'label'  => 'Aktive Kanäle',
+                'detail' => count($enabledChannels) . ' aktiviert',
+                'ok'     => $hasChannel,
+                'warn'   => false,
+            ],
+            [
+                'label'  => 'Cron läuft',
+                'detail' => $cronAge < 0
+                    ? 'noch nie gelaufen'
+                    : (human_time_diff($lastCron) . ' her'),
+                'ok'     => $cronAge >= 0 && $cronAge < 12 * HOUR_IN_SECONDS,
+                'warn'   => $cronAge >= 12 * HOUR_IN_SECONDS && $cronAge < 16 * HOUR_IN_SECONDS,
+            ],
+        ];
+    }
+
+    private static function computeKpis(): array
+    {
+        // Posts via Postmeta
+        global $wpdb;
+        $todayStart = (new \DateTimeImmutable('today', wp_timezone()))->getTimestamp();
+        $weekAgo    = (new \DateTimeImmutable('-7 days', wp_timezone()))->getTimestamp();
+
+        $postsToday = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(DISTINCT p.ID) FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
+             WHERE pm.meta_key = %s
+               AND p.post_status = 'publish'
+               AND p.post_date_gmt >= %s",
+            '_newss_video_id',
+            gmdate('Y-m-d H:i:s', $todayStart)
+        ));
+        $postsWeek = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(DISTINCT p.ID) FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
+             WHERE pm.meta_key = %s
+               AND p.post_status = 'publish'
+               AND p.post_date_gmt >= %s",
+            '_newss_video_id',
+            gmdate('Y-m-d H:i:s', $weekAgo)
+        ));
+
+        // AS-Counts (cached)
+        $counts = self::statusCounts();
+
+        // Anthropic-Cap heute
+        $cap = (int) get_option('newss_anthropic_daily_cap', 0);
+        $callsOpt = get_option('newss_anthropic_calls_today', null);
+        $callsToday = (is_array($callsOpt) && ($callsOpt['date'] ?? '') === wp_date('Y-m-d')) ? (int) $callsOpt['count'] : 0;
+        $callsLabel = $cap > 0 ? "{$callsToday} / {$cap}" : (string) $callsToday;
+        $callsColor = ($cap > 0 && $callsToday >= $cap * 0.9) ? '#c00' : '#1d2327';
+
+        return [
+            ['label' => 'Posts heute',         'value' => $postsToday,                'color' => '#0a5a00'],
+            ['label' => 'Posts 7 Tage',        'value' => $postsWeek],
+            ['label' => 'Pending Jobs',        'value' => (int) ($counts['pending'] ?? 0)],
+            ['label' => 'Failed Jobs',         'value' => (int) ($counts['failed'] ?? 0), 'color' => ((int) ($counts['failed'] ?? 0) > 0 ? '#c00' : '#1d2327')],
+            ['label' => 'Claude-Calls heute',  'value' => $callsLabel, 'color' => $callsColor, 'sub' => $cap > 0 ? 'Cap aktiv' : 'kein Cap'],
+        ];
+    }
+
+    private static function isYtDlpAvailable(): bool
+    {
+        $bin = (string) get_option('newss_ytdlp_path', 'yt-dlp');
+        if (str_starts_with($bin, '/')) {
+            return @is_executable($bin);
+        }
+        foreach (['/usr/local/bin', '/usr/bin', '/snap/bin'] as $dir) {
+            if (@is_executable($dir . '/' . $bin)) return true;
+        }
+        return false;
+    }
+
     private static function statusCounts(): array
     {
         $cached = get_transient(self::STATUS_COUNTS_CACHE_KEY);
