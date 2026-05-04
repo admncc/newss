@@ -8,20 +8,24 @@ final class RssPoller
 {
     public static function pollAll(): void
     {
+        error_log('[newss] pollAll: enter');
         $channels = get_option('newss_channels', []);
         if (!is_array($channels) || $channels === []) {
+            error_log('[newss] pollAll abort: no channels');
             return;
         }
         $enabled = array_values(array_filter($channels, static fn(array $c): bool => !empty($c['enabled']) && !empty($c['id'])));
         if ($enabled === []) {
+            error_log('[newss] pollAll abort: no enabled channels');
             return;
         }
 
         // Mutex: verhindert parallele pollAll-Läufe (System-Cron + manueller AS-Trigger)
         if (get_transient('newss_poll_running')) {
-            error_log('[newss] pollAll abort: another run in progress');
+            error_log('[newss] pollAll abort: another run in progress (mutex transient set)');
             return;
         }
+        error_log('[newss] pollAll: starting with ' . count($enabled) . ' channels');
         set_transient('newss_poll_running', time(), 30 * MINUTE_IN_SECONDS);
         update_option('newss_last_cron_run', time(), false);
 

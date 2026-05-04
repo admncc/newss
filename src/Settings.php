@@ -385,6 +385,7 @@ final class Settings
             wp_die('Forbidden');
         }
         check_admin_referer('newss_run_now');
+        error_log('[newss] handleRunNow: enter');
 
         // Stale-Mutex-Cleanup: wenn ein vorheriger Run abgestuerzt ist
         // (PHP-Timeout, Worker-Kill etc.), bleibt newss_poll_running stehen
@@ -396,34 +397,47 @@ final class Settings
             error_log('[newss] handleRunNow: cleared stale newss_poll_running mutex (no progress)');
         }
 
-        if (function_exists('as_enqueue_async_action')) {
-            \as_enqueue_async_action('newss_run_poll_now', [], 'newss');
-            set_transient('newss_poll_queued', time(), 5 * MINUTE_IN_SECONDS);
-            $flag = 'queued';
-            // AS-Queue-Runner triggert wir UNTEN — nach fastcgi_finish_request,
-            // damit der Browser-Redirect nicht auf pollAll() warten muss.
+        // Marker fuer UI: Klick-Zeit, AJAX zeigt 'In Queue'-Box bis pollAll
+        // tatsaechlich Progress schreibt.
+        set_transient('newss_poll_queued', time(), 5 * MINUTE_IN_SECONDS);
+
+        wp_safe_redirect(add_query_arg(['ran' => 'queued'], admin_url('admin.php?page=' . self::SLUG_STATUS)));
+
+        // Antwort an Browser zuruecksenden BEVOR pollAll laeuft (kann
+        // mehrere Minuten dauern). Browser sieht Status-Page mit Live-Bar
+        // sofort, waehrend pollAll im Hintergrund tatsaechlich pollt.
+        // Reihenfolge der Detach-Calls ist wichtig:
+        //  1) Headers + Body raus
+        //  2) PHP-FPM: fastcgi_finish_request schliesst die Connection
+        //  3) Apache mod_php: Content-Length + flush ist die zuverlaessigste
+        //     Variante (kein fastcgi_finish_request verfuegbar)
+        @ignore_user_abort(true);
+        @set_time_limit(600);
+        if (function_exists('fastcgi_finish_request')) {
+            @fastcgi_finish_request();
         } else {
-            RssPoller::pollAll();
-            $flag = 'sync';
+            // Apache mod_php Fallback
+            if (!headers_sent()) {
+                header('Connection: close');
+                header('Content-Length: 0');
+            }
+            while (ob_get_level() > 0) { @ob_end_flush(); }
+            @flush();
         }
 
-        wp_safe_redirect(add_query_arg(['ran' => $flag], admin_url('admin.php?page=' . self::SLUG_STATUS)));
-        // Wenn moeglich: Antwort an Browser zuruecksenden BEVOR wir den
-        // (potentiell langlaufenden) AS-Queue-Runner triggern. So sieht der
-        // User sofort die Status-Page mit Live-Progress, waehrend pollAll
-        // im Hintergrund tatsaechlich laeuft.
-        if (function_exists('fastcgi_finish_request')) {
-            fastcgi_finish_request();
+        error_log('[newss] handleRunNow: detached, calling pollAll() now');
+        // pollAll direkt aufrufen statt via Action-Scheduler.
+        // Grund: bei DISABLE_WP_CRON=true triggert AS nur alle 8h (System-Cron),
+        // d.h. as_enqueue_async_action laesst den Job in der Queue liegen.
+        // Direkter Call ist deterministisch und blockt den User nicht
+        // (wir sind nach detach in einem detached PHP-Prozess).
+        try {
+            RssPoller::pollAll();
+            error_log('[newss] handleRunNow: pollAll() returned cleanly');
+        } catch (\Throwable $e) {
+            error_log('[newss] handleRunNow: pollAll exception: ' . $e->getMessage());
         }
-        @ignore_user_abort(true);
-        @set_time_limit(300);
-        if (class_exists('\\ActionScheduler') && method_exists('\\ActionScheduler', 'runner')) {
-            try {
-                \ActionScheduler::runner()->run('Newss-Manual');
-            } catch (\Throwable $e) {
-                error_log('[newss] AS runner failed: ' . $e->getMessage());
-            }
-        }
+        delete_transient('newss_poll_queued');
         exit;
     }
 
