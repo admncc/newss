@@ -142,70 +142,79 @@ final class Worker
      * stehen als failed, gibt zugehoerige Locks und Pending-Transients
      * frei und entfernt newss_poll_running falls stale.
      *
-     * @return array{cleared:int, jobs:array<int,array<string,string>>, poll_mutex:bool}
+     * Direkter DB-Update statt store->mark_failure, weil der bei offenem
+     * claim_id (Worker mid-flight gekillt) still fehlschlaegt.
+     *
+     * @return array{cleared:int, jobs:array<int,array<string,string>>, poll_mutex:bool, errors:array<int,string>}
      */
     public static function cleanupStuckJobs(int $thresholdSec = 900): array
     {
-        $out = ['cleared' => 0, 'jobs' => [], 'poll_mutex' => false];
-        if (!class_exists('\\ActionScheduler')) {
-            return $out;
-        }
-        try {
-            $store = \ActionScheduler::store();
-            $ids = (array) $store->query_actions([
-                'hook'     => self::HOOK_PROCESS,
-                'group'    => 'newss',
-                'status'   => 'in-progress',
-                'per_page' => 100,
-                'order'    => 'ASC',
-                'orderby'  => 'date',
-            ]);
-            $now = time();
-            foreach ($ids as $aid) {
-                $aid = (int) $aid;
-                try {
-                    $action = $store->fetch_action($aid);
-                } catch (\Throwable) {
-                    continue;
-                }
-                if (!$action) continue;
-                $schedule = $action->get_schedule();
-                $startTs = 0;
-                if ($schedule && method_exists($schedule, 'get_date') && $schedule->get_date()) {
-                    $startTs = $schedule->get_date()->getTimestamp();
-                }
-                if ($startTs === 0 || ($now - $startTs) < $thresholdSec) {
-                    continue;
-                }
-                $args    = $action->get_args();
-                $payload = $args[0] ?? [];
-                $videoId = (string) ($payload['video_id'] ?? '');
+        global $wpdb;
+        $out = ['cleared' => 0, 'jobs' => [], 'poll_mutex' => false, 'errors' => []];
 
-                // Lock + Pending-Transient freigeben
-                if ($videoId !== '') {
-                    delete_option('newss_lock_' . $videoId);
-                    delete_transient(self::pendingTransientKey($videoId));
-                }
+        $actionsTable = $wpdb->prefix . 'actionscheduler_actions';
+        $cutoffGmt = gmdate('Y-m-d H:i:s', time() - $thresholdSec);
 
-                // Action als failed markieren (AS zeigt sie dann im failed-Bucket)
-                try {
-                    $store->mark_failure($aid);
-                    \ActionScheduler::logger()->log($aid, '[newss] stuck-cleanup: marked failed (age ' . ($now - $startTs) . 's)');
-                } catch (\Throwable $e) {
-                    error_log('[newss] cleanupStuckJobs mark_failure ' . $aid . ': ' . $e->getMessage());
-                    continue;
-                }
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT action_id, args, scheduled_date_gmt, claim_id
+             FROM {$actionsTable}
+             WHERE hook = %s
+               AND status = %s
+               AND scheduled_date_gmt <= %s
+             ORDER BY scheduled_date_gmt ASC
+             LIMIT 100",
+            self::HOOK_PROCESS,
+            'in-progress',
+            $cutoffGmt
+        ), ARRAY_A) ?: [];
 
-                $out['cleared']++;
-                $out['jobs'][] = [
-                    'action_id' => (string) $aid,
-                    'video_id'  => $videoId,
-                    'title'     => (string) ($payload['video_title'] ?? ''),
-                    'age_sec'   => (string) ($now - $startTs),
-                ];
+        foreach ($rows as $row) {
+            $aid = (int) $row['action_id'];
+            $args = json_decode((string) $row['args'], true);
+            $payload = is_array($args) ? ($args[0] ?? []) : [];
+            $videoId = (string) ($payload['video_id'] ?? '');
+            $title   = (string) ($payload['video_title'] ?? '');
+
+            $age = max(0, time() - (new \DateTime((string) $row['scheduled_date_gmt'], new \DateTimeZone('UTC')))->getTimestamp());
+
+            // Direkter UPDATE — funktioniert auch wenn claim_id != 0
+            $updated = $wpdb->update(
+                $actionsTable,
+                ['status' => 'failed', 'claim_id' => 0],
+                ['action_id' => $aid],
+                ['%s', '%d'],
+                ['%d']
+            );
+            if ($updated === false) {
+                $out['errors'][] = "Action #{$aid}: SQL-Update failed (" . $wpdb->last_error . ')';
+                continue;
             }
-        } catch (\Throwable $e) {
-            error_log('[newss] cleanupStuckJobs error: ' . $e->getMessage());
+
+            // Lock + Pending-Transient freigeben
+            if ($videoId !== '') {
+                delete_option('newss_lock_' . $videoId);
+                delete_transient(self::pendingTransientKey($videoId));
+            }
+
+            // Logger ist optional (AS muss geladen sein) — Best-effort
+            if (class_exists('\\ActionScheduler') && method_exists('\\ActionScheduler', 'logger')) {
+                try {
+                    \ActionScheduler::logger()->log(
+                        $aid,
+                        sprintf('[newss] stuck-cleanup: marked failed via direct UPDATE (age %ds, claim_id=%d)', $age, (int) $row['claim_id'])
+                    );
+                } catch (\Throwable $e) {
+                    error_log('[newss] cleanup log error #' . $aid . ': ' . $e->getMessage());
+                }
+            }
+
+            $out['cleared']++;
+            $out['jobs'][] = [
+                'action_id' => (string) $aid,
+                'video_id'  => $videoId,
+                'title'     => $title,
+                'age_sec'   => (string) $age,
+            ];
         }
 
         // Stale poll-mutex (>thresholdSec ohne progress-Option = sicher tot)

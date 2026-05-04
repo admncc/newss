@@ -54,7 +54,11 @@ final class Settings
                 $msg .= ' (+' . (count($titles) - 5) . ' weitere)';
             }
         }
-        set_transient('newss_pipeline_notice', ['type' => 'success', 'message' => $msg], 30);
+        if (!empty($result['errors'])) {
+            $msg .= ' FEHLER: ' . implode(' | ', $result['errors']);
+        }
+        $type = !empty($result['errors']) ? 'error' : ($result['cleared'] > 0 ? 'success' : 'info');
+        set_transient('newss_pipeline_notice', ['type' => $type, 'message' => $msg], 30);
         wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_PIPELINE));
         exit;
     }
