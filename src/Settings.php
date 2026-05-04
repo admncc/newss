@@ -6,7 +6,10 @@ namespace Newss;
 
 final class Settings
 {
-    private const OPTION_GROUP = 'newss_settings';
+    private const GROUP_CLAUDE     = 'newss_settings_claude';
+    private const GROUP_YOUTUBE    = 'newss_settings_youtube';
+    private const GROUP_TRANSCRIPT = 'newss_settings_transcript';
+    private const GROUP_PUBLISHING = 'newss_settings_publishing';
 
     private const SLUG_STATUS      = 'newss-settings';
     private const SLUG_PIPELINE    = 'newss-pipeline';
@@ -578,55 +581,70 @@ final class Settings
 
     public static function registerSettings(): void
     {
-        register_setting(self::OPTION_GROUP, 'newss_anthropic_api_key', [
-            'sanitize_callback' => 'sanitize_text_field',
-            'show_in_rest'      => false,
-            'default'           => '',
-            'autoload'          => false,
-        ]);
-        register_setting(self::OPTION_GROUP, 'newss_supadata_api_key', [
-            'sanitize_callback' => 'sanitize_text_field',
-            'default'           => '',
-            'autoload'          => false,
-        ]);
-        register_setting(self::OPTION_GROUP, 'newss_whisper_api_key', [
-            'sanitize_callback' => 'sanitize_text_field',
-            'default'           => '',
-            'autoload'          => false,
-        ]);
-        register_setting(self::OPTION_GROUP, 'newss_youtube_api_key', [
-            'sanitize_callback' => 'sanitize_text_field',
-            'default'           => '',
-            'autoload'          => false,
-        ]);
-        register_setting(self::OPTION_GROUP, 'newss_youtube_method', [
-            'sanitize_callback' => [self::class, 'sanitizeYoutubeMethod'],
-            'default'           => 'rss',
-        ]);
+        // Wichtig: jede Option NUR in der Gruppe ihrer Page registrieren.
+        // Sonst werden beim Speichern einer Page die Options anderer Pages
+        // mit-ueberschrieben (WP Settings-API setzt alle Optionen einer
+        // Gruppe -- fehlende POST-Felder werden auf '' gesetzt).
 
-        $opts = [
+        // Claude-Page
+        $claudeOpts = [
+            'newss_anthropic_api_key'      => 'sanitize_text_field',
             'newss_anthropic_model'        => 'sanitize_text_field',
             'newss_anthropic_max_tokens'   => 'absint',
             'newss_anthropic_daily_cap'    => 'absint',
             'newss_anthropic_temperature'  => [self::class, 'sanitizeTemperature'],
             'newss_system_prompt'          => [self::class, 'sanitizeMultiline'],
             'newss_user_prompt_template'   => [self::class, 'sanitizeMultiline'],
-            'newss_youtube_proxy'          => [self::class, 'sanitizeMultiline'],
-            'newss_youtube_cookie'         => 'sanitize_text_field',
-            'newss_ytdlp_path'             => 'sanitize_text_field',
-            'newss_whisper_enabled'        => 'absint',
-            'newss_whisper_daily_cap'      => 'absint',
-            'newss_default_category'       => 'absint',
-            'newss_category_list'          => [self::class, 'sanitizeMultiline'],
-            'newss_blocked_topics'         => [self::class, 'sanitizeBlockedTopics'],
-            'newss_blocked_action'         => [self::class, 'sanitizeBlockedAction'],
-            'newss_preclassify_enabled'    => 'absint',
-            'newss_default_status'         => [self::class, 'sanitizeStatus'],
-            'newss_kill_switch_drafts'     => 'absint',
-            'newss_post_author'            => 'absint',
         ];
-        foreach ($opts as $opt => $cb) {
-            register_setting(self::OPTION_GROUP, $opt, ['sanitize_callback' => $cb]);
+        foreach ($claudeOpts as $opt => $cb) {
+            register_setting(self::GROUP_CLAUDE, $opt, [
+                'sanitize_callback' => $cb,
+                'autoload'          => $opt === 'newss_anthropic_api_key' ? false : true,
+            ]);
+        }
+
+        // YouTube-Page
+        $youtubeOpts = [
+            'newss_youtube_api_key' => 'sanitize_text_field',
+            'newss_youtube_method'  => [self::class, 'sanitizeYoutubeMethod'],
+            'newss_youtube_proxy'   => [self::class, 'sanitizeMultiline'],
+            'newss_youtube_cookie'  => 'sanitize_text_field',
+        ];
+        foreach ($youtubeOpts as $opt => $cb) {
+            register_setting(self::GROUP_YOUTUBE, $opt, [
+                'sanitize_callback' => $cb,
+                'autoload'          => $opt === 'newss_youtube_api_key' ? false : true,
+            ]);
+        }
+
+        // Transcript-Page
+        $transcriptOpts = [
+            'newss_supadata_api_key'   => 'sanitize_text_field',
+            'newss_whisper_api_key'    => 'sanitize_text_field',
+            'newss_whisper_enabled'    => 'absint',
+            'newss_whisper_daily_cap'  => 'absint',
+            'newss_ytdlp_path'         => 'sanitize_text_field',
+        ];
+        foreach ($transcriptOpts as $opt => $cb) {
+            register_setting(self::GROUP_TRANSCRIPT, $opt, [
+                'sanitize_callback' => $cb,
+                'autoload'          => in_array($opt, ['newss_supadata_api_key', 'newss_whisper_api_key'], true) ? false : true,
+            ]);
+        }
+
+        // Publishing-Page
+        $publishingOpts = [
+            'newss_default_category'    => 'absint',
+            'newss_category_list'       => [self::class, 'sanitizeMultiline'],
+            'newss_blocked_topics'      => [self::class, 'sanitizeBlockedTopics'],
+            'newss_blocked_action'      => [self::class, 'sanitizeBlockedAction'],
+            'newss_preclassify_enabled' => 'absint',
+            'newss_default_status'      => [self::class, 'sanitizeStatus'],
+            'newss_kill_switch_drafts'  => 'absint',
+            'newss_post_author'         => 'absint',
+        ];
+        foreach ($publishingOpts as $opt => $cb) {
+            register_setting(self::GROUP_PUBLISHING, $opt, ['sanitize_callback' => $cb]);
         }
     }
 
@@ -985,7 +1003,7 @@ final class Settings
         <div class="wrap">
             <h1>Newss · Claude (Anthropic)</h1>
             <form method="post" action="options.php">
-                <?php settings_fields(self::OPTION_GROUP); ?>
+                <?php settings_fields(self::GROUP_CLAUDE); ?>
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row"><label for="newss_anthropic_api_key">API-Key</label></th>
@@ -1051,7 +1069,7 @@ final class Settings
         <div class="wrap">
             <h1>Newss · YouTube</h1>
             <form method="post" action="options.php">
-                <?php settings_fields(self::OPTION_GROUP); ?>
+                <?php settings_fields(self::GROUP_YOUTUBE); ?>
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row">Methode</th>
@@ -1148,7 +1166,7 @@ final class Settings
                 Reihenfolge: zuerst <strong>Supadata</strong> (wenn Key gesetzt) → dann <strong>yt-dlp</strong> → dann <strong>Whisper</strong> (wenn aktiviert).
             </p>
             <form method="post" action="options.php">
-                <?php settings_fields(self::OPTION_GROUP); ?>
+                <?php settings_fields(self::GROUP_TRANSCRIPT); ?>
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row"><label for="newss_supadata_api_key">Supadata.ai API-Key</label></th>
@@ -1237,7 +1255,7 @@ final class Settings
         <div class="wrap">
             <h1>Newss · Veröffentlichung</h1>
             <form method="post" action="options.php">
-                <?php settings_fields(self::OPTION_GROUP); ?>
+                <?php settings_fields(self::GROUP_PUBLISHING); ?>
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row"><label for="newss_default_category">Default-Kategorie</label></th>
