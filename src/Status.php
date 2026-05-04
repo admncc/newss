@@ -18,14 +18,14 @@ final class Status
         ?>
         <h2>Letzte Channel-Polls</h2>
 
-        <div id="newss-poll-progress-box" style="display:<?php echo $hasProgress ? 'block' : 'none'; ?>;margin:8px 0 16px 0;padding:14px 18px;border:1px solid #2271b1;border-left:4px solid #2271b1;background:#f0f6fc;max-width:880px">
-            <h3 style="margin:0 0 8px 0;font-size:14px" id="newss-progress-heading">⏳ Polling läuft …</h3>
-            <p style="margin:0 0 6px 0"><strong id="newss-progress-text">—</strong></p>
-            <div style="background:#dcdcde;height:10px;border-radius:4px;overflow:hidden">
+        <div id="newss-poll-progress-box" data-state="<?php echo $hasProgress ? 'running' : 'idle'; ?>" style="margin:8px 0 16px 0;padding:14px 18px;border:1px solid #dcdcde;border-left:4px solid #999;background:#f6f7f7;max-width:880px">
+            <h3 style="margin:0 0 8px 0;font-size:14px" id="newss-progress-heading">○ Bereit — kein aktiver Poll</h3>
+            <p style="margin:0 0 6px 0"><strong id="newss-progress-text">Klick „Jetzt manuell pollen" oben — Status erscheint hier live.</strong></p>
+            <div id="newss-progress-bar-wrap" style="background:#dcdcde;height:10px;border-radius:4px;overflow:hidden;display:none">
                 <div id="newss-progress-bar" style="background:#2271b1;height:100%;width:0%;transition:width 0.3s ease"></div>
             </div>
-            <p id="newss-progress-hint" style="margin:8px 0 0 0;font-size:11px;color:#666">
-                Aktualisiert sich alle 3 Sekunden — kein Page-Reload nötig.
+            <p id="newss-progress-hint" style="margin:8px 0 0 0;font-size:11px;color:#999">
+                Live-Status pollt alle 3 Sekunden, sobald ein Lauf gestartet wird.
             </p>
             <ul id="newss-progress-channels" style="margin:10px 0 0 0;padding:0;list-style:none;font-size:12px;max-height:180px;overflow:auto"></ul>
         </div>
@@ -69,6 +69,7 @@ final class Status
         (function(){
             var box = document.getElementById('newss-poll-progress-box');
             if (!box) return;
+            var barWrap = document.getElementById('newss-progress-bar-wrap');
             var bar     = document.getElementById('newss-progress-bar');
             var txt     = document.getElementById('newss-progress-text');
             var hint    = document.getElementById('newss-progress-hint');
@@ -77,9 +78,10 @@ final class Status
             var ajaxUrl = <?php echo wp_json_encode($ajaxUrl); ?>;
             var initiallyRunning = <?php echo $hasProgress ? 'true' : 'false'; ?>;
             var wasRunning = initiallyRunning;
+            var wasQueued = false;
             var stopped = false;
             var pageLoadedAt = Date.now();
-            var IDLE_LIMIT_MS = 5 * 60 * 1000;
+            var IDLE_LIMIT_MS = 10 * 60 * 1000;
             var timer = null;
 
             function stop() {
@@ -109,11 +111,33 @@ final class Status
                 });
             }
 
+            function showIdle() {
+                box.dataset.state = 'idle';
+                box.style.background = '#f6f7f7';
+                box.style.borderLeftColor = '#999';
+                heading.textContent = '○ Bereit — kein aktiver Poll';
+                txt.textContent = 'Klick „Jetzt manuell pollen" oben — Status erscheint hier live.';
+                barWrap.style.display = 'none';
+                hint.innerHTML = 'Live-Status pollt alle 3 Sekunden, sobald ein Lauf gestartet wird.';
+                if (list) list.innerHTML = '';
+            }
+
+            function showQueued() {
+                box.dataset.state = 'queued';
+                box.style.background = '#fff8e1';
+                box.style.borderLeftColor = '#ffb900';
+                heading.textContent = '⏳ In Queue — Worker startet …';
+                txt.textContent = 'Action-Scheduler hat den Job aufgenommen, Background-Worker startet beim nächsten Tick (meist binnen 60s).';
+                barWrap.style.display = 'none';
+                hint.innerHTML = 'Status aktualisiert sich automatisch sobald pollAll() loslegt.';
+            }
+
             function showRunning(p) {
-                box.style.display = 'block';
+                box.dataset.state = 'running';
                 box.style.background = '#f0f6fc';
-                box.style.borderColor = '#2271b1';
+                box.style.borderLeftColor = '#2271b1';
                 heading.textContent = '⏳ Polling läuft …';
+                barWrap.style.display = 'block';
                 bar.style.background = '#2271b1';
                 var pct = p.total > 0 ? Math.round(p.done / p.total * 100) : 0;
                 bar.style.width = pct + '%';
@@ -124,10 +148,11 @@ final class Status
             }
 
             function showFinished() {
-                box.style.display = 'block';
-                heading.textContent = '✓ Polling abgeschlossen';
+                box.dataset.state = 'finished';
                 box.style.background = '#eaf7e6';
-                box.style.borderColor = '#0a7';
+                box.style.borderLeftColor = '#0a7';
+                heading.textContent = '✓ Polling abgeschlossen';
+                barWrap.style.display = 'block';
                 bar.style.width = '100%';
                 bar.style.background = '#0a7';
                 txt.textContent = 'Alle Kanäle verarbeitet.';
@@ -142,15 +167,20 @@ final class Status
                         if (!d) return;
                         if (d.in_progress && d.progress) {
                             wasRunning = true;
+                            wasQueued = false;
                             showRunning(d.progress);
                         } else if (wasRunning) {
                             showFinished();
                             stop();
+                        } else if (d.queued) {
+                            wasQueued = true;
+                            showQueued();
+                        } else if (wasQueued) {
+                            // Queued-Marker weg ohne dass running -> evtl. Worker-Mutex blockt.
+                            // Box zurueck zu Idle, weiter pollen falls neuer Klick.
+                            showIdle();
                         } else {
-                            box.style.display = 'none';
-                            // Keine running session und nie gelaufen seit Page-Load.
-                            // Idle-Polling fortsetzen — aber max IDLE_LIMIT_MS,
-                            // damit ein frisch enqueueter Poll noch erscheinen kann.
+                            showIdle();
                             if (Date.now() - pageLoadedAt > IDLE_LIMIT_MS) {
                                 stop();
                             }

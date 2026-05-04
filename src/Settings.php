@@ -277,9 +277,16 @@ final class Settings
         if (!current_user_can('manage_options')) {
             wp_send_json_error(['message' => 'Forbidden'], 403);
         }
+        $progress = get_option('newss_poll_progress', null);
+        $inProgress = is_array($progress);
+        // Queued-Marker loeschen sobald Worker tatsaechlich angefangen hat
+        if ($inProgress && get_transient('newss_poll_queued')) {
+            delete_transient('newss_poll_queued');
+        }
         wp_send_json([
-            'in_progress' => (bool) get_option('newss_poll_progress', null),
-            'progress'    => get_option('newss_poll_progress', null),
+            'in_progress' => $inProgress,
+            'queued'      => !$inProgress && (bool) get_transient('newss_poll_queued'),
+            'progress'    => $progress,
             'last_poll'   => get_option('newss_last_poll', null),
         ]);
     }
@@ -379,15 +386,44 @@ final class Settings
         }
         check_admin_referer('newss_run_now');
 
+        // Stale-Mutex-Cleanup: wenn ein vorheriger Run abgestuerzt ist
+        // (PHP-Timeout, Worker-Kill etc.), bleibt newss_poll_running stehen
+        // und blockt jeden weiteren Lauf bis zum Transient-Expire (30 Min).
+        // -> Wenn keine Progress-Option vorhanden, ist der Run definitiv tot.
+        $running = get_transient('newss_poll_running');
+        if ($running && !get_option('newss_poll_progress')) {
+            delete_transient('newss_poll_running');
+            error_log('[newss] handleRunNow: cleared stale newss_poll_running mutex (no progress)');
+        }
+
         if (function_exists('as_enqueue_async_action')) {
             \as_enqueue_async_action('newss_run_poll_now', [], 'newss');
+            set_transient('newss_poll_queued', time(), 5 * MINUTE_IN_SECONDS);
             $flag = 'queued';
+            // AS-Queue-Runner triggert wir UNTEN — nach fastcgi_finish_request,
+            // damit der Browser-Redirect nicht auf pollAll() warten muss.
         } else {
             RssPoller::pollAll();
             $flag = 'sync';
         }
 
         wp_safe_redirect(add_query_arg(['ran' => $flag], admin_url('admin.php?page=' . self::SLUG_STATUS)));
+        // Wenn moeglich: Antwort an Browser zuruecksenden BEVOR wir den
+        // (potentiell langlaufenden) AS-Queue-Runner triggern. So sieht der
+        // User sofort die Status-Page mit Live-Progress, waehrend pollAll
+        // im Hintergrund tatsaechlich laeuft.
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+        @ignore_user_abort(true);
+        @set_time_limit(300);
+        if (class_exists('\\ActionScheduler') && method_exists('\\ActionScheduler', 'runner')) {
+            try {
+                \ActionScheduler::runner()->run('Newss-Manual');
+            } catch (\Throwable $e) {
+                error_log('[newss] AS runner failed: ' . $e->getMessage());
+            }
+        }
         exit;
     }
 

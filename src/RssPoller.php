@@ -25,6 +25,13 @@ final class RssPoller
         set_transient('newss_poll_running', time(), 30 * MINUTE_IN_SECONDS);
         update_option('newss_last_cron_run', time(), false);
 
+        // 18 Channels × ~3s = ~1 min minimum, mit Whisper/yt-dlp deutlich
+        // mehr. Standard-PHP-Limit (30s) und AS-Runner-Limit (30s) reichen
+        // nicht. Hier explizit hochsetzen damit pollAll() nicht abbricht
+        // und das Mutex stehen laesst.
+        @set_time_limit(600);
+        @ignore_user_abort(true);
+
         update_option('newss_poll_progress', [
             'started_at' => time(),
             'total'      => count($enabled),

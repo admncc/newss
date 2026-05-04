@@ -21,6 +21,9 @@ final class Plugin
         }
 
         add_filter('action_scheduler_retention_period', static fn(): int => 7 * DAY_IN_SECONDS);
+        // Default-AS-Runner-Limit ist 30s -- pollAll mit 18 Channels +
+        // Worker mit Whisper-Transcription brauchen deutlich mehr.
+        add_filter('action_scheduler_queue_runner_time_limit', static fn(): int => 600);
         add_action('init', [self::class, 'maybeRunMigrations'], 1);
 
         if (is_admin()) {
