@@ -84,7 +84,7 @@ final class Status
         }
 
         $channels = get_option('newss_channels', []);
-        $filterUrlBase = admin_url('admin.php?page=newss-settings');
+        $filterUrlBase = admin_url('admin.php?page=newss-pipeline');
 
         $statsLabels = [
             'pending'     => 'Pending',
@@ -102,7 +102,7 @@ final class Status
         </p>
 
         <form method="get" action="" style="margin:8px 0 12px 0;display:flex;align-items:center;gap:8px">
-            <input type="hidden" name="page" value="newss-settings">
+            <input type="hidden" name="page" value="newss-pipeline">
             <label for="newss_channel" style="font-weight:600">Filter nach Kanal:</label>
             <select name="newss_channel" id="newss_channel" onchange="this.form.submit()">
                 <option value="">— Alle Kanäle —</option>
@@ -184,7 +184,7 @@ final class Status
 
     private static function renderPagination(int $page, int $totalPages, int $total, string $channelFilter = ''): string
     {
-        $base = admin_url('admin.php?page=newss-settings');
+        $base = admin_url('admin.php?page=newss-pipeline');
         if ($channelFilter !== '') {
             $base = add_query_arg('newss_channel', $channelFilter, $base);
         }

@@ -6,8 +6,15 @@ namespace Newss;
 
 final class Settings
 {
-    private const PAGE_SLUG = 'newss-settings';
     private const OPTION_GROUP = 'newss_settings';
+
+    private const SLUG_STATUS      = 'newss-settings';
+    private const SLUG_PIPELINE    = 'newss-pipeline';
+    private const SLUG_CHANNELS    = 'newss-channels';
+    private const SLUG_CLAUDE      = 'newss-claude';
+    private const SLUG_YOUTUBE     = 'newss-youtube';
+    private const SLUG_TRANSCRIPT  = 'newss-transcript';
+    private const SLUG_PUBLISHING  = 'newss-publishing';
 
     public static function register(): void
     {
@@ -17,139 +24,24 @@ final class Settings
         add_action('admin_post_newss_test_whisper', [self::class, 'handleTestWhisper']);
     }
 
-    public static function handleTestWhisper(): void
-    {
-        if (!current_user_can('manage_options')) {
-            wp_die('Forbidden');
-        }
-        check_admin_referer('newss_test_whisper');
-
-        $key = sanitize_text_field(wp_unslash((string) ($_POST['whisper_key'] ?? '')));
-        $keySource = 'eingegeben';
-        if ($key === '') {
-            $key = (string) get_option('newss_whisper_api_key', '');
-            $keySource = 'gespeichert';
-        }
-        if ($key === '') {
-            set_transient('newss_whisper_test', [
-                'type'    => 'error',
-                'lines'   => ['Kein Key gesetzt — sowohl Input-Feld als auch DB sind leer.'],
-            ], 60);
-            self::redirect();
-        }
-
-        $keyPrefix = substr($key, 0, 12);
-        $keyLen    = strlen($key);
-        $startedAt = microtime(true);
-
-        $resp = wp_remote_get('https://api.openai.com/v1/models', [
-            'timeout' => 20,
-            'headers' => ['Authorization' => 'Bearer ' . $key],
-        ]);
-
-        $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
-
-        $lines = [
-            sprintf('Key-Quelle: %s', $keySource),
-            sprintf('Key-Prefix: %s… (Länge: %d Zeichen)', $keyPrefix, $keyLen),
-            sprintf('Endpunkt: GET https://api.openai.com/v1/models'),
-            sprintf('Dauer: %d ms', $elapsedMs),
-        ];
-
-        if (is_wp_error($resp)) {
-            $lines[] = 'Network-Fehler (wp_error): ' . $resp->get_error_code() . ' — ' . $resp->get_error_message();
-            set_transient('newss_whisper_test', ['type' => 'error', 'lines' => $lines], 120);
-            self::redirect();
-        }
-
-        $code = (int) wp_remote_retrieve_response_code($resp);
-        $body = (string) wp_remote_retrieve_body($resp);
-        $hdrs = wp_remote_retrieve_headers($resp);
-
-        $lines[] = sprintf('HTTP-Status: %d', $code);
-        $orgHeader = is_object($hdrs) && method_exists($hdrs, 'offsetGet') ? (string) ($hdrs['openai-organization'] ?? '') : '';
-        if ($orgHeader !== '') {
-            $lines[] = 'OpenAI-Org: ' . $orgHeader;
-        }
-        $rateRemain = is_object($hdrs) ? (string) ($hdrs['x-ratelimit-remaining-requests'] ?? '') : '';
-        if ($rateRemain !== '') {
-            $lines[] = 'Rate-Limit-Remaining: ' . $rateRemain;
-        }
-
-        if ($code === 200) {
-            $data = json_decode($body, true);
-            $modelCount = is_array($data) && isset($data['data']) ? count($data['data']) : 0;
-            $hasWhisper = false;
-            $whisperModels = [];
-            foreach (($data['data'] ?? []) as $m) {
-                $id = (string) ($m['id'] ?? '');
-                if (str_contains($id, 'whisper')) {
-                    $hasWhisper = true;
-                    $whisperModels[] = $id;
-                }
-            }
-            $lines[] = sprintf('Modelle erreichbar: %d', $modelCount);
-            $lines[] = $hasWhisper
-                ? 'Whisper-Modelle: ' . implode(', ', $whisperModels)
-                : 'Achtung: whisper-1 nicht in der Liste — Key-Permissions decken Audio nicht ab.';
-            set_transient('newss_whisper_test', [
-                'type'  => $hasWhisper ? 'success' : 'warning',
-                'lines' => $lines,
-            ], 120);
-            self::redirect();
-        }
-
-        $errMsg = '';
-        $errCode = '';
-        $errType = '';
-        $data = json_decode($body, true);
-        if (is_array($data) && isset($data['error'])) {
-            $errMsg  = (string) ($data['error']['message'] ?? '');
-            $errCode = (string) ($data['error']['code'] ?? '');
-            $errType = (string) ($data['error']['type'] ?? '');
-        }
-        $lines[] = sprintf('error.code: %s', $errCode ?: '—');
-        $lines[] = sprintf('error.type: %s', $errType ?: '—');
-        $lines[] = 'error.message: ' . ($errMsg ?: '(keine)');
-        $lines[] = 'Body-Auszug: ' . substr($body, 0, 500);
-
-        $hint = match ($errCode) {
-            'invalid_api_key'     => 'Key existiert nicht / widerrufen / Tippfehler. Neuen Key auf platform.openai.com/api-keys erstellen.',
-            'insufficient_quota'  => 'Account hat kein Guthaben → platform.openai.com/account/billing/overview → Add Credits.',
-            'rate_limit_exceeded' => 'Aktuelles Rate-Limit überschritten — kurz warten und retesten.',
-            default               => 'Wenn Key OK aussieht: Key-Permissions prüfen — restricted Keys brauchen explizit "Model capabilities → Audio".',
-        };
-        $lines[] = '→ Hinweis: ' . $hint;
-
-        set_transient('newss_whisper_test', ['type' => 'error', 'lines' => $lines], 120);
-        self::redirect();
-    }
-
-    private static function redirect(): void
-    {
-        wp_safe_redirect(admin_url('admin.php?page=' . self::PAGE_SLUG));
-        exit;
-    }
-
     public static function addMenu(): void
     {
         add_menu_page(
             'Newss',
             'Newss',
             'manage_options',
-            self::PAGE_SLUG,
-            [self::class, 'renderPage'],
+            self::SLUG_STATUS,
+            [self::class, 'renderStatusPage'],
             'dashicons-megaphone',
             58
         );
-        add_submenu_page(
-            self::PAGE_SLUG,
-            'Newss – Einstellungen',
-            'Einstellungen',
-            'manage_options',
-            self::PAGE_SLUG,
-            [self::class, 'renderPage']
-        );
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Status',         'Status',          'manage_options', self::SLUG_STATUS,     [self::class, 'renderStatusPage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Job-Pipeline',   'Job-Pipeline',    'manage_options', self::SLUG_PIPELINE,   [self::class, 'renderPipelinePage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Kanäle',         'Kanäle',          'manage_options', self::SLUG_CHANNELS,   [self::class, 'renderChannelsPage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Claude',         'Claude',          'manage_options', self::SLUG_CLAUDE,     [self::class, 'renderClaudePage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · YouTube',        'YouTube',         'manage_options', self::SLUG_YOUTUBE,    [self::class, 'renderYoutubePage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Transkript',     'Transkript',      'manage_options', self::SLUG_TRANSCRIPT, [self::class, 'renderTranscriptPage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Veröffentlichung','Veröffentlichung','manage_options', self::SLUG_PUBLISHING, [self::class, 'renderPublishingPage']);
     }
 
     public static function registerSettings(): void
@@ -170,7 +62,6 @@ final class Settings
             'default'           => '',
             'autoload'          => false,
         ]);
-
         register_setting(self::OPTION_GROUP, 'newss_youtube_api_key', [
             'sanitize_callback' => 'sanitize_text_field',
             'default'           => '',
@@ -205,27 +96,11 @@ final class Settings
         }
     }
 
-    public static function sanitizeTemperature($value): float
-    {
-        $f = (float) $value;
-        return max(0.0, min(1.0, $f));
-    }
-
-    public static function sanitizeMultiline($value): string
-    {
-        return wp_kses_post((string) $value);
-    }
-
-    public static function sanitizeStatus($value): string
-    {
-        return in_array($value, ['publish', 'draft'], true) ? $value : 'publish';
-    }
-
-    public static function sanitizeYoutubeMethod($value): string
-    {
-        return in_array($value, ['api', 'rss'], true) ? $value : 'rss';
-    }
-
+    public static function sanitizeTemperature($value): float    { return max(0.0, min(1.0, (float) $value)); }
+    public static function sanitizeMultiline($value): string     { return wp_kses_post((string) $value); }
+    public static function sanitizeStatus($value): string        { return in_array($value, ['publish', 'draft'], true) ? $value : 'publish'; }
+    public static function sanitizeYoutubeMethod($value): string { return in_array($value, ['api', 'rss'], true) ? $value : 'rss'; }
+    public static function sanitizeBlockedAction($value): string { return in_array($value, ['skip', 'draft'], true) ? $value : 'skip'; }
     public static function sanitizeBlockedTopics($value): array
     {
         if (!is_array($value)) {
@@ -233,11 +108,6 @@ final class Settings
         }
         $allowed = array_keys(Anthropic::topicLabels());
         return array_values(array_intersect(array_map('strval', $value), $allowed));
-    }
-
-    public static function sanitizeBlockedAction($value): string
-    {
-        return in_array($value, ['skip', 'draft'], true) ? $value : 'skip';
     }
 
     public static function handleRunNow(): void
@@ -255,66 +125,141 @@ final class Settings
             $flag = 'sync';
         }
 
-        wp_safe_redirect(add_query_arg(['ran' => $flag], admin_url('admin.php?page=' . self::PAGE_SLUG)));
+        wp_safe_redirect(add_query_arg(['ran' => $flag], admin_url('admin.php?page=' . self::SLUG_STATUS)));
         exit;
     }
 
-    public static function renderPage(): void
+    public static function handleTestWhisper(): void
     {
         if (!current_user_can('manage_options')) {
-            return;
+            wp_die('Forbidden');
+        }
+        check_admin_referer('newss_test_whisper');
+
+        $key = sanitize_text_field(wp_unslash((string) ($_POST['whisper_key'] ?? '')));
+        $keySource = 'eingegeben';
+        if ($key === '') {
+            $key = (string) get_option('newss_whisper_api_key', '');
+            $keySource = 'gespeichert';
+        }
+        if ($key === '') {
+            set_transient('newss_whisper_test', ['type' => 'error', 'lines' => ['Kein Key gesetzt — sowohl Input-Feld als auch DB sind leer.']], 60);
+            self::redirectTo(self::SLUG_TRANSCRIPT);
         }
 
-        $models = [
-            'claude-opus-4-7'   => 'Claude Opus 4.7 (höchste Qualität)',
-            'claude-sonnet-4-6' => 'Claude Sonnet 4.6 (Standard, empfohlen)',
-            'claude-haiku-4-5'  => 'Claude Haiku 4.5 (schnell, günstig)',
+        $keyPrefix = substr($key, 0, 12);
+        $keyLen    = strlen($key);
+        $startedAt = microtime(true);
+
+        $resp = wp_remote_get('https://api.openai.com/v1/models', [
+            'timeout' => 20,
+            'headers' => ['Authorization' => 'Bearer ' . $key],
+        ]);
+        $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
+
+        $lines = [
+            sprintf('Key-Quelle: %s', $keySource),
+            sprintf('Key-Prefix: %s… (Länge: %d Zeichen)', $keyPrefix, $keyLen),
+            'Endpunkt: GET https://api.openai.com/v1/models',
+            sprintf('Dauer: %d ms', $elapsedMs),
         ];
 
-        $apiKey      = (string) get_option('newss_anthropic_api_key', '');
-        $model       = (string) get_option('newss_anthropic_model', 'claude-sonnet-4-6');
-        $maxTokens   = (int)    get_option('newss_anthropic_max_tokens', 4000);
-        $temperature = (float)  get_option('newss_anthropic_temperature', 1.0);
-        $systemPrompt= (string) get_option('newss_system_prompt', Anthropic::defaultSystemPrompt());
-        $userTpl     = (string) get_option('newss_user_prompt_template', Anthropic::defaultUserTemplate());
-        $youtubeProxy = (string) get_option('newss_youtube_proxy', '');
-        $supadataKey = (string) get_option('newss_supadata_api_key', '');
-        $ytdlp       = (string) get_option('newss_ytdlp_path', 'yt-dlp');
-        $whEnabled   = (int)    get_option('newss_whisper_enabled', 0);
-        $whKey       = (string) get_option('newss_whisper_api_key', '');
-        $defCat      = (int)    get_option('newss_default_category', 0);
-        $catList     = (string) get_option('newss_category_list', Anthropic::defaultCategoriesText());
-        $defStatus   = (string) get_option('newss_default_status', 'publish');
-        $blockedTopics = (array) get_option('newss_blocked_topics', []);
-        $blockedAction = (string) get_option('newss_blocked_action', 'skip');
-        $killSwitch    = (int)    get_option('newss_kill_switch_drafts', 0);
-        $postAuthor  = (int)    get_option('newss_post_author', 0);
+        if (is_wp_error($resp)) {
+            $lines[] = 'Network-Fehler (wp_error): ' . $resp->get_error_code() . ' — ' . $resp->get_error_message();
+            set_transient('newss_whisper_test', ['type' => 'error', 'lines' => $lines], 120);
+            self::redirectTo(self::SLUG_TRANSCRIPT);
+        }
 
-        $lastPoll = get_option('newss_last_poll', null);
-        $nextRun  = wp_next_scheduled(Cron::HOOK_PERIODIC);
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        $body = (string) wp_remote_retrieve_body($resp);
+        $hdrs = wp_remote_retrieve_headers($resp);
 
+        $lines[] = sprintf('HTTP-Status: %d', $code);
+        if (is_object($hdrs) && method_exists($hdrs, 'offsetGet')) {
+            $org = (string) ($hdrs['openai-organization'] ?? '');
+            if ($org !== '') $lines[] = 'OpenAI-Org: ' . $org;
+            $rate = (string) ($hdrs['x-ratelimit-remaining-requests'] ?? '');
+            if ($rate !== '') $lines[] = 'Rate-Limit-Remaining: ' . $rate;
+        }
+
+        if ($code === 200) {
+            $data = json_decode($body, true);
+            $modelCount = is_array($data) && isset($data['data']) ? count($data['data']) : 0;
+            $whisperModels = [];
+            foreach (($data['data'] ?? []) as $m) {
+                $id = (string) ($m['id'] ?? '');
+                if (str_contains($id, 'whisper')) $whisperModels[] = $id;
+            }
+            $lines[] = sprintf('Modelle erreichbar: %d', $modelCount);
+            $lines[] = $whisperModels !== []
+                ? 'Whisper-Modelle: ' . implode(', ', $whisperModels)
+                : 'Achtung: whisper-1 nicht in der Liste — Key-Permissions decken Audio nicht ab.';
+            set_transient('newss_whisper_test', [
+                'type'  => $whisperModels !== [] ? 'success' : 'warning',
+                'lines' => $lines,
+            ], 120);
+            self::redirectTo(self::SLUG_TRANSCRIPT);
+        }
+
+        $errMsg = $errCode = $errType = '';
+        $data = json_decode($body, true);
+        if (is_array($data) && isset($data['error'])) {
+            $errMsg  = (string) ($data['error']['message'] ?? '');
+            $errCode = (string) ($data['error']['code'] ?? '');
+            $errType = (string) ($data['error']['type'] ?? '');
+        }
+        $lines[] = sprintf('error.code: %s', $errCode ?: '—');
+        $lines[] = sprintf('error.type: %s', $errType ?: '—');
+        $lines[] = 'error.message: ' . ($errMsg ?: '(keine)');
+        $lines[] = 'Body-Auszug: ' . substr($body, 0, 500);
+        $hint = match ($errCode) {
+            'invalid_api_key'     => 'Key existiert nicht / widerrufen / Tippfehler. Neuen Key auf platform.openai.com/api-keys erstellen.',
+            'insufficient_quota'  => 'Account hat kein Guthaben → platform.openai.com/account/billing/overview → Add Credits.',
+            'rate_limit_exceeded' => 'Aktuelles Rate-Limit überschritten — kurz warten und retesten.',
+            default               => 'Wenn Key OK aussieht: Permissions prüfen — restricted Keys brauchen explizit "Model capabilities → Audio".',
+        };
+        $lines[] = '→ Hinweis: ' . $hint;
+
+        set_transient('newss_whisper_test', ['type' => 'error', 'lines' => $lines], 120);
+        self::redirectTo(self::SLUG_TRANSCRIPT);
+    }
+
+    private static function redirectTo(string $slug): void
+    {
+        wp_safe_redirect(admin_url('admin.php?page=' . $slug));
+        exit;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Pages
+    // ─────────────────────────────────────────────────────────────────────
+
+    public static function renderStatusPage(): void
+    {
+        if (!current_user_can('manage_options')) return;
+
+        $ytdlp = (string) get_option('newss_ytdlp_path', 'yt-dlp');
         $ytDlpFound = self::detectBinary($ytdlp);
         $ffmpegFound = self::detectBinary('ffmpeg');
-
+        $lastPoll = get_option('newss_last_poll', null);
+        $nextRun  = wp_next_scheduled(Cron::HOOK_PERIODIC);
         $runUrl = wp_nonce_url(admin_url('admin-post.php?action=newss_run_now'), 'newss_run_now');
-
         ?>
         <div class="wrap">
-            <h1>Newss – Einstellungen</h1>
+            <h1>Newss · Status</h1>
 
             <?php if (isset($_GET['ran'])):
-                $ranFlag = sanitize_key((string) $_GET['ran']);
-                ?>
+                $flag = sanitize_key((string) $_GET['ran']); ?>
                 <div class="notice notice-success is-dismissible">
-                    <?php if ($ranFlag === 'queued'): ?>
-                        <p>RSS-Polling wurde in die Hintergrund-Queue gelegt — läuft jetzt asynchron. Reload in ~30–90 Sekunden für aktualisierten Status.</p>
+                    <?php if ($flag === 'queued'): ?>
+                        <p>RSS-Polling wurde in die Hintergrund-Queue gelegt — läuft asynchron. Reload in ~30–90 Sekunden für aktualisierten Status.</p>
                     <?php else: ?>
                         <p>RSS-Polling wurde ausgeführt.</p>
                     <?php endif; ?>
                 </div>
             <?php endif; ?>
 
-            <h2>Status</h2>
+            <h2>Server-Status</h2>
             <table class="widefat striped" style="max-width:780px">
                 <tbody>
                 <tr><th>yt-dlp</th><td><?php echo $ytDlpFound ? '<span style="color:#0a7">gefunden</span>' : '<span style="color:#c00">nicht gefunden</span>'; ?> (<code><?php echo esc_html($ytdlp); ?></code>)</td></tr>
@@ -326,13 +271,9 @@ final class Settings
                         printf(
                             '%s — Kanäle: %d, neue Videos: %d, Fehler: %d',
                             esc_html(self::formatTime((int) $lastPoll['time'])),
-                            (int) $s['channels'],
-                            (int) $s['new'],
-                            (int) $s['errors']
+                            (int) $s['channels'], (int) $s['new'], (int) $s['errors']
                         );
-                    } else {
-                        echo '—';
-                    }
+                    } else { echo '—'; }
                 ?></td></tr>
                 </tbody>
             </table>
@@ -346,16 +287,56 @@ final class Settings
 
             <?php Status::renderChannelPoll(); ?>
 
-            <?php Status::renderPipeline(); ?>
-
             <?php Updater::renderSection(); ?>
+        </div>
+        <?php
+    }
 
+    public static function renderPipelinePage(): void
+    {
+        if (!current_user_can('manage_options')) return;
+        ?>
+        <div class="wrap">
+            <h1>Newss · Job-Pipeline</h1>
+            <?php Status::renderPipeline(); ?>
+        </div>
+        <?php
+    }
+
+    public static function renderChannelsPage(): void
+    {
+        if (!current_user_can('manage_options')) return;
+        ?>
+        <div class="wrap">
+            <h1>Newss · Kanäle</h1>
             <?php Channels::renderSection(); ?>
+        </div>
+        <?php
+    }
 
+    public static function renderClaudePage(): void
+    {
+        if (!current_user_can('manage_options')) return;
+
+        $models = [
+            'claude-opus-4-7'   => 'Claude Opus 4.7 (höchste Qualität)',
+            'claude-sonnet-4-6' => 'Claude Sonnet 4.6 (Standard, empfohlen)',
+            'claude-haiku-4-5'  => 'Claude Haiku 4.5 (schnell, günstig)',
+        ];
+        $apiKey       = (string) get_option('newss_anthropic_api_key', '');
+        $model        = (string) get_option('newss_anthropic_model', 'claude-sonnet-4-6');
+        $maxTokens    = (int)    get_option('newss_anthropic_max_tokens', 4000);
+        $temperature  = (float)  get_option('newss_anthropic_temperature', 1.0);
+        $systemPrompt = (string) get_option('newss_system_prompt', Anthropic::defaultSystemPrompt());
+        $userTpl      = (string) get_option('newss_user_prompt_template', Anthropic::defaultUserTemplate());
+        $dailyCap     = (int)    get_option('newss_anthropic_daily_cap', 0);
+        $callsToday   = get_option('newss_anthropic_calls_today', null);
+        $todayCount   = (is_array($callsToday) && ($callsToday['date'] ?? '') === wp_date('Y-m-d')) ? (int) $callsToday['count'] : 0;
+        ?>
+        <div class="wrap">
+            <h1>Newss · Claude (Anthropic)</h1>
             <form method="post" action="options.php">
                 <?php settings_fields(self::OPTION_GROUP); ?>
-
-                <h2>Anthropic Claude</h2>
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row"><label for="newss_anthropic_api_key">API-Key</label></th>
@@ -382,22 +363,16 @@ final class Settings
                     <tr>
                         <th scope="row"><label for="newss_anthropic_daily_cap">Max Calls / Tag</label></th>
                         <td>
-                            <?php
-                            $dailyCap = (int) get_option('newss_anthropic_daily_cap', 0);
-                            $callsToday = get_option('newss_anthropic_calls_today', null);
-                            $todayCount = (is_array($callsToday) && ($callsToday['date'] ?? '') === wp_date('Y-m-d')) ? (int) $callsToday['count'] : 0;
-                            ?>
                             <input type="number" id="newss_anthropic_daily_cap" name="newss_anthropic_daily_cap" value="<?php echo esc_attr((string) $dailyCap); ?>" min="0" max="10000" step="10">
                             <p class="description">
                                 Hard-Cap pro Kalendertag (Europe/Berlin). 0 = unbegrenzt.
                                 Heute bereits: <strong><?php echo (int) $todayCount; ?></strong> Calls.
-                                Bei Erreichen werden weitere Worker-Jobs als „skipped" markiert (kein Anthropic-Charge mehr).
                             </p>
                         </td>
                     </tr>
                     <tr>
                         <th scope="row"><label for="newss_system_prompt">System-Prompt</label></th>
-                        <td><textarea id="newss_system_prompt" name="newss_system_prompt" rows="10" class="large-text code"><?php echo esc_textarea($systemPrompt); ?></textarea></td>
+                        <td><textarea id="newss_system_prompt" name="newss_system_prompt" rows="14" class="large-text code"><?php echo esc_textarea($systemPrompt); ?></textarea></td>
                     </tr>
                     <tr>
                         <th scope="row"><label for="newss_user_prompt_template">User-Prompt-Template</label></th>
@@ -407,9 +382,23 @@ final class Settings
                         </td>
                     </tr>
                 </table>
+                <?php submit_button(); ?>
+            </form>
+        </div>
+        <?php
+    }
 
-                <h2>YouTube-Zugriff</h2>
-                <?php $ytMethod = (string) get_option('newss_youtube_method', 'rss'); ?>
+    public static function renderYoutubePage(): void
+    {
+        if (!current_user_can('manage_options')) return;
+
+        $ytMethod     = (string) get_option('newss_youtube_method', 'rss');
+        $youtubeProxy = (string) get_option('newss_youtube_proxy', '');
+        ?>
+        <div class="wrap">
+            <h1>Newss · YouTube</h1>
+            <form method="post" action="options.php">
+                <?php settings_fields(self::OPTION_GROUP); ?>
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row">Methode</th>
@@ -448,11 +437,10 @@ final class Settings
                         <tr>
                             <th scope="row"><label for="newss_youtube_proxy">Proxy-Liste</label></th>
                             <td>
-                                <textarea id="newss_youtube_proxy" name="newss_youtube_proxy" rows="6" class="large-text code" placeholder="host:port:user:pass&#10;http://user:pass@host:port&#10;socks5://host:port&#10;# Eine Zeile pro Proxy. Bei mehreren wird per Request randomisiert rotiert."><?php echo esc_textarea($youtubeProxy); ?></textarea>
+                                <textarea id="newss_youtube_proxy" name="newss_youtube_proxy" rows="6" class="large-text code" placeholder="host:port:user:pass&#10;http://user:pass@host:port&#10;socks5://host:port"><?php echo esc_textarea($youtubeProxy); ?></textarea>
                                 <p class="description">
                                     Eine Zeile pro Proxy. Akzeptierte Formate:<br>
-                                    <code>host:port:user:pass</code> &nbsp;|&nbsp; <code>http://user:pass@host:port</code> &nbsp;|&nbsp; <code>socks5://host:port</code><br>
-                                    Bei mehreren Einträgen wird pro Request randomisiert einer gewählt.
+                                    <code>host:port:user:pass</code> &nbsp;|&nbsp; <code>http://user:pass@host:port</code> &nbsp;|&nbsp; <code>socks5://host:port</code>
                                 </p>
                             </td>
                         </tr>
@@ -460,10 +448,7 @@ final class Settings
                             <th scope="row"><label for="newss_youtube_cookie">Consent-Cookie</label></th>
                             <td>
                                 <input type="text" id="newss_youtube_cookie" name="newss_youtube_cookie" value="<?php echo esc_attr((string) get_option('newss_youtube_cookie', \Newss\Http::DEFAULT_YT_COOKIE)); ?>" class="large-text code" placeholder="<?php echo esc_attr(\Newss\Http::DEFAULT_YT_COOKIE); ?>">
-                                <p class="description">
-                                    Wird bei DE-/EU-IPs gebraucht damit YouTube nicht die Consent-Wall serviert.
-                                    Default funktioniert seit 2021. Leer = kein Cookie senden.
-                                </p>
+                                <p class="description">Wird bei DE-/EU-IPs gebraucht damit YouTube nicht die Consent-Wall serviert. Leer = kein Cookie senden.</p>
                             </td>
                         </tr>
                     </table>
@@ -484,20 +469,37 @@ final class Settings
                 document.addEventListener('DOMContentLoaded', newssToggleYtMethod);
                 </script>
 
-                <h2>Transkript-Quelle</h2>
-                <p class="description" style="max-width:780px;margin-bottom:8px">
-                    Reihenfolge: zuerst <strong>Supadata</strong> (wenn Key gesetzt) → dann <strong>yt-dlp</strong> → dann <strong>Whisper</strong> (wenn aktiviert).
-                    Auf Cloud-Hostern (RunCloud, AWS, etc.) wird yt-dlp meist von YouTube als Bot blockiert — Supadata umgeht das.
-                </p>
+                <?php submit_button(); ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    public static function renderTranscriptPage(): void
+    {
+        if (!current_user_can('manage_options')) return;
+
+        $supadataKey = (string) get_option('newss_supadata_api_key', '');
+        $ytdlp       = (string) get_option('newss_ytdlp_path', 'yt-dlp');
+        $whEnabled   = (int)    get_option('newss_whisper_enabled', 0);
+        $whKey       = (string) get_option('newss_whisper_api_key', '');
+
+        $whisperNotice = get_transient('newss_whisper_test');
+        if ($whisperNotice) delete_transient('newss_whisper_test');
+        ?>
+        <div class="wrap">
+            <h1>Newss · Transkript</h1>
+            <p class="description" style="max-width:780px">
+                Reihenfolge: zuerst <strong>Supadata</strong> (wenn Key gesetzt) → dann <strong>yt-dlp</strong> → dann <strong>Whisper</strong> (wenn aktiviert).
+            </p>
+            <form method="post" action="options.php">
+                <?php settings_fields(self::OPTION_GROUP); ?>
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row"><label for="newss_supadata_api_key">Supadata.ai API-Key</label></th>
                         <td>
                             <input type="password" id="newss_supadata_api_key" name="newss_supadata_api_key" value="<?php echo esc_attr($supadataKey); ?>" class="regular-text" autocomplete="off">
-                            <p class="description">
-                                Empfohlen für Cloud-Hosting. Account: <a href="https://supadata.ai" target="_blank" rel="noopener">supadata.ai</a>.
-                                Wenn gesetzt, wird Supadata <strong>vor</strong> yt-dlp probiert.
-                            </p>
+                            <p class="description">Empfohlen für Cloud-Hosting. Account: <a href="https://supadata.ai" target="_blank" rel="noopener">supadata.ai</a>.</p>
                         </td>
                     </tr>
                     <tr>
@@ -517,12 +519,6 @@ final class Settings
                         <th scope="row"><label for="newss_whisper_api_key">OpenAI API-Key (für Whisper)</label></th>
                         <td>
                             <input type="password" id="newss_whisper_api_key" name="newss_whisper_api_key" value="<?php echo esc_attr($whKey); ?>" class="regular-text" autocomplete="off">
-                            <?php
-                            $whisperNotice = get_transient('newss_whisper_test');
-                            if ($whisperNotice) {
-                                delete_transient('newss_whisper_test');
-                            }
-                            ?>
                             <div style="margin-top:8px">
                                 <button type="button" class="button" onclick="(function(){var snap=document.getElementById('newss-whisper-key-snapshot');var inp=document.getElementById('newss_whisper_api_key');snap.value=inp.value;document.getElementById('newss-test-whisper-form').submit();})();">Key testen</button>
                                 <span class="description">— Test-Call gegen <code>/v1/models</code>. Nimmt den aktuellen Wert im Feld oben (auch ohne vorher zu speichern).</span>
@@ -540,21 +536,45 @@ final class Settings
                         </td>
                     </tr>
                 </table>
+                <?php submit_button(); ?>
+            </form>
 
-                <h2>Veröffentlichung</h2>
+            <form id="newss-test-whisper-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:none">
+                <input type="hidden" name="action" value="newss_test_whisper">
+                <input type="hidden" name="whisper_key" value="" id="newss-whisper-key-snapshot">
+                <?php wp_nonce_field('newss_test_whisper'); ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    public static function renderPublishingPage(): void
+    {
+        if (!current_user_can('manage_options')) return;
+
+        $defCat        = (int)    get_option('newss_default_category', 0);
+        $catList       = (string) get_option('newss_category_list', Anthropic::defaultCategoriesText());
+        $defStatus     = (string) get_option('newss_default_status', 'publish');
+        $blockedTopics = (array)  get_option('newss_blocked_topics', []);
+        $blockedAction = (string) get_option('newss_blocked_action', 'skip');
+        $killSwitch    = (int)    get_option('newss_kill_switch_drafts', 0);
+        $postAuthor    = (int)    get_option('newss_post_author', 0);
+        ?>
+        <div class="wrap">
+            <h1>Newss · Veröffentlichung</h1>
+            <form method="post" action="options.php">
+                <?php settings_fields(self::OPTION_GROUP); ?>
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row"><label for="newss_default_category">Default-Kategorie</label></th>
                         <td>
-                            <?php
-                            wp_dropdown_categories([
+                            <?php wp_dropdown_categories([
                                 'show_option_none'  => '— keine —',
                                 'option_none_value' => 0,
                                 'name'              => 'newss_default_category',
                                 'selected'          => $defCat,
                                 'hide_empty'        => false,
-                            ]);
-                            ?>
+                            ]); ?>
                             <p class="description">Letzter Fallback wenn weder KI eine Kategorie auswählt noch beim Kanal eine gesetzt ist.</p>
                         </td>
                     </tr>
@@ -564,8 +584,8 @@ final class Settings
                             <textarea id="newss_category_list" name="newss_category_list" rows="10" class="large-text code" placeholder="Eine Kategorie pro Zeile"><?php echo esc_textarea($catList); ?></textarea>
                             <p class="description">
                                 Eine Kategorie pro Zeile. Claude wählt für jeden Artikel exakt eine aus dieser Liste.
-                                Fehlende Kategorien werden bei Bedarf in WordPress automatisch angelegt.<br>
-                                <strong>Reihenfolge:</strong> KI-Auswahl gewinnt zuerst — die Kanal-Kategorie greift nur wenn die KI nichts Passendes findet, dann ggf. die Default-Kategorie.
+                                Fehlende Kategorien werden bei Bedarf automatisch angelegt.<br>
+                                <strong>Reihenfolge:</strong> KI-Auswahl gewinnt zuerst — Kanal-Kategorie greift nur wenn KI nichts Passendes findet, dann ggf. Default-Kategorie.
                             </p>
                         </td>
                     </tr>
@@ -588,7 +608,6 @@ final class Settings
                         <th scope="row">Sensible Themen</th>
                         <td>
                             <fieldset>
-                                <legend class="screen-reader-text"><span>Sensible Themen</span></legend>
                                 <?php foreach (Anthropic::topicLabels() as $key => $label): ?>
                                     <label style="display:block;margin-bottom:4px">
                                         <input type="checkbox" name="newss_blocked_topics[]" value="<?php echo esc_attr($key); ?>" <?php checked(in_array($key, $blockedTopics, true)); ?>>
@@ -611,22 +630,19 @@ final class Settings
                         <th scope="row"><label for="newss_post_author">Autor (User-ID)</label></th>
                         <td>
                             <input type="number" id="newss_post_author" name="newss_post_author" value="<?php echo esc_attr((string) $postAuthor); ?>" min="0">
-                            <p class="description">0 = aktueller Benutzer beim Cron-Lauf (i. d. R. nicht eingeloggt → fällt auf User-ID 1). Setze auf einen dedizierten „Redaktion"-User.</p>
+                            <p class="description">0 = aktueller Benutzer beim Cron-Lauf (i. d. R. nicht eingeloggt → fällt auf User-ID 1).</p>
                         </td>
                     </tr>
                 </table>
-
                 <?php submit_button(); ?>
-            </form>
-
-            <form id="newss-test-whisper-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:none">
-                <input type="hidden" name="action" value="newss_test_whisper">
-                <input type="hidden" name="whisper_key" value="" id="newss-whisper-key-snapshot">
-                <?php wp_nonce_field('newss_test_whisper'); ?>
             </form>
         </div>
         <?php
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────
 
     private static function detectBinary(string $bin): bool
     {
@@ -635,14 +651,10 @@ final class Settings
         }
         if (function_exists('shell_exec')) {
             $out = trim((string) @shell_exec(sprintf('command -v %s 2>/dev/null', escapeshellarg($bin))));
-            if ($out !== '') {
-                return true;
-            }
+            if ($out !== '') return true;
         }
         foreach (['/usr/local/bin', '/usr/bin', '/snap/bin', '/usr/local/sbin', '/usr/sbin', '/bin'] as $dir) {
-            if (@is_executable($dir . '/' . $bin)) {
-                return true;
-            }
+            if (@is_executable($dir . '/' . $bin)) return true;
         }
         return false;
     }

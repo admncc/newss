@@ -34,7 +34,7 @@ final class Channels
             }
         }
         $isEdit = $editing !== null;
-        $cancelUrl = admin_url('admin.php?page=newss-settings');
+        $cancelUrl = admin_url('admin.php?page=newss-channels');
         ?>
         <h2>Kanäle</h2>
 
@@ -122,7 +122,7 @@ final class Channels
                 <?php foreach ($channels as $ch):
                     $catName = $ch['category'] ? get_cat_name((int) $ch['category']) : '— Default —';
                     $editUrl = add_query_arg(
-                        ['page' => 'newss-settings', 'edit' => rawurlencode((string) $ch['id'])],
+                        ['page' => 'newss-channels', 'edit' => rawurlencode((string) $ch['id'])],
                         admin_url('admin.php')
                     );
                     $delUrl = wp_nonce_url(
@@ -279,7 +279,7 @@ final class Channels
 
     private static function redirect(): void
     {
-        wp_safe_redirect(admin_url('admin.php?page=newss-settings'));
+        wp_safe_redirect(admin_url('admin.php?page=newss-channels'));
         exit;
     }
 }
