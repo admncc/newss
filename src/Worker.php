@@ -137,6 +137,91 @@ final class Worker
         return 'newss_pending_' . $videoId;
     }
 
+    /**
+     * Markiert AS-Actions die laenger als $thresholdSec auf in-progress
+     * stehen als failed, gibt zugehoerige Locks und Pending-Transients
+     * frei und entfernt newss_poll_running falls stale.
+     *
+     * @return array{cleared:int, jobs:array<int,array<string,string>>, poll_mutex:bool}
+     */
+    public static function cleanupStuckJobs(int $thresholdSec = 900): array
+    {
+        $out = ['cleared' => 0, 'jobs' => [], 'poll_mutex' => false];
+        if (!class_exists('\\ActionScheduler')) {
+            return $out;
+        }
+        try {
+            $store = \ActionScheduler::store();
+            $ids = (array) $store->query_actions([
+                'hook'     => self::HOOK_PROCESS,
+                'group'    => 'newss',
+                'status'   => 'in-progress',
+                'per_page' => 100,
+                'order'    => 'ASC',
+                'orderby'  => 'date',
+            ]);
+            $now = time();
+            foreach ($ids as $aid) {
+                $aid = (int) $aid;
+                try {
+                    $action = $store->fetch_action($aid);
+                } catch (\Throwable) {
+                    continue;
+                }
+                if (!$action) continue;
+                $schedule = $action->get_schedule();
+                $startTs = 0;
+                if ($schedule && method_exists($schedule, 'get_date') && $schedule->get_date()) {
+                    $startTs = $schedule->get_date()->getTimestamp();
+                }
+                if ($startTs === 0 || ($now - $startTs) < $thresholdSec) {
+                    continue;
+                }
+                $args    = $action->get_args();
+                $payload = $args[0] ?? [];
+                $videoId = (string) ($payload['video_id'] ?? '');
+
+                // Lock + Pending-Transient freigeben
+                if ($videoId !== '') {
+                    delete_option('newss_lock_' . $videoId);
+                    delete_transient(self::pendingTransientKey($videoId));
+                }
+
+                // Action als failed markieren (AS zeigt sie dann im failed-Bucket)
+                try {
+                    $store->mark_failure($aid);
+                    \ActionScheduler::logger()->log($aid, '[newss] stuck-cleanup: marked failed (age ' . ($now - $startTs) . 's)');
+                } catch (\Throwable $e) {
+                    error_log('[newss] cleanupStuckJobs mark_failure ' . $aid . ': ' . $e->getMessage());
+                    continue;
+                }
+
+                $out['cleared']++;
+                $out['jobs'][] = [
+                    'action_id' => (string) $aid,
+                    'video_id'  => $videoId,
+                    'title'     => (string) ($payload['video_title'] ?? ''),
+                    'age_sec'   => (string) ($now - $startTs),
+                ];
+            }
+        } catch (\Throwable $e) {
+            error_log('[newss] cleanupStuckJobs error: ' . $e->getMessage());
+        }
+
+        // Stale poll-mutex (>thresholdSec ohne progress-Option = sicher tot)
+        $running = get_transient('newss_poll_running');
+        if ($running && !get_option('newss_poll_progress')) {
+            $startedTs = is_numeric($running) ? (int) $running : 0;
+            if ($startedTs === 0 || (time() - $startedTs) > $thresholdSec) {
+                delete_transient('newss_poll_running');
+                $out['poll_mutex'] = true;
+            }
+        }
+
+        delete_transient(Status::STATUS_COUNTS_CACHE_KEY);
+        return $out;
+    }
+
     private static function blockedTopicHits(array $rewrite): array
     {
         $tags    = array_values(array_filter((array) ($rewrite['topic_tags'] ?? [])));

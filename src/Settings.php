@@ -28,6 +28,35 @@ final class Settings
         add_action('admin_post_newss_test_supadata', [self::class, 'handleTestSupadata']);
         add_action('wp_ajax_newss_poll_progress', [self::class, 'handleAjaxPollProgress']);
         add_action('wp_ajax_newss_pipeline_live', [self::class, 'handleAjaxPipelineLive']);
+        add_action('admin_post_newss_cleanup_stuck', [self::class, 'handleCleanupStuck']);
+    }
+
+    public static function handleCleanupStuck(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+        check_admin_referer('newss_cleanup_stuck');
+
+        $threshold = max(60, (int) ($_POST['threshold'] ?? 900));
+        $result = Worker::cleanupStuckJobs($threshold);
+
+        $msg = sprintf(
+            '%d Stuck-Job(s) als failed markiert (Threshold: %d Min.).%s',
+            $result['cleared'],
+            (int) round($threshold / 60),
+            $result['poll_mutex'] ? ' Stale poll-Mutex zusaetzlich befreit.' : ''
+        );
+        if ($result['cleared'] > 0) {
+            $titles = array_map(static fn(array $j): string => $j['title'] ?: $j['video_id'], $result['jobs']);
+            $msg .= ' Betroffen: ' . implode(', ', array_slice($titles, 0, 5));
+            if (count($titles) > 5) {
+                $msg .= ' (+' . (count($titles) - 5) . ' weitere)';
+            }
+        }
+        set_transient('newss_pipeline_notice', ['type' => 'success', 'message' => $msg], 30);
+        wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_PIPELINE));
+        exit;
     }
 
     public static function handleAjaxPipelineLive(): void
@@ -680,9 +709,18 @@ final class Settings
     public static function renderPipelinePage(): void
     {
         if (!current_user_can('manage_options')) return;
+        $notice = get_transient('newss_pipeline_notice');
+        if ($notice) {
+            delete_transient('newss_pipeline_notice');
+        }
         ?>
         <div class="wrap">
             <h1>Newss · Job-Pipeline</h1>
+            <?php if (is_array($notice)): ?>
+                <div class="notice notice-<?php echo esc_attr((string) $notice['type']); ?> is-dismissible">
+                    <p><?php echo esc_html((string) $notice['message']); ?></p>
+                </div>
+            <?php endif; ?>
             <?php Status::renderPipeline(); ?>
         </div>
         <?php

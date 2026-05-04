@@ -261,6 +261,7 @@ final class Status
                         $startedTs = (new \DateTime($createdMap[$aid], new \DateTimeZone('UTC')))->getTimestamp();
                     } catch (\Throwable) {}
                 }
+                $ageSec = $startedTs > 0 ? max(0, time() - $startedTs) : 0;
                 $out['running'][] = [
                     'action_id'   => $aid,
                     'video_id'    => (string) ($payload['video_id'] ?? ''),
@@ -268,6 +269,8 @@ final class Status
                     'channel'     => (string) ($payload['channel_name'] ?? ''),
                     'started_ts'  => $startedTs,
                     'started_ago' => $startedTs > 0 ? self::timeAgoDe($startedTs) : '—',
+                    'age_sec'     => $ageSec,
+                    'stale'       => $ageSec > 900, // > 15 min
                     'last_log'    => $lastLog ? self::shorten((string) ($lastLog['message'] ?? ''), 140) : '',
                 ];
             }
@@ -279,13 +282,25 @@ final class Status
 
     public static function renderPipelineLive(): void
     {
-        $ajaxUrl = admin_url('admin-ajax.php?action=newss_pipeline_live');
+        $ajaxUrl    = admin_url('admin-ajax.php?action=newss_pipeline_live');
+        $cleanupUrl = admin_url('admin-post.php');
         ?>
         <div id="newss-pipeline-live" style="margin:8px 0 20px 0;padding:14px 18px;border:1px solid #dcdcde;border-left:4px solid #999;background:#f6f7f7;max-width:1280px">
             <h3 style="margin:0 0 8px 0;font-size:14px" id="newss-pl-heading">○ Aktuell keine laufenden Jobs</h3>
             <p style="margin:0 0 8px 0;font-size:12px;color:#666" id="newss-pl-counts">—</p>
-            <ul id="newss-pl-list" style="margin:0;padding:0;list-style:none;font-size:12px;max-height:280px;overflow:auto"></ul>
-            <p style="margin:8px 0 0 0;font-size:11px;color:#999">Aktualisiert sich alle 4 Sekunden — kein Page-Reload nötig.</p>
+            <ul id="newss-pl-list" style="margin:0;padding:0;list-style:none;font-size:12px;max-height:320px;overflow:auto"></ul>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:10px;flex-wrap:wrap">
+                <p style="margin:0;font-size:11px;color:#999">Aktualisiert sich alle 4 Sekunden — kein Page-Reload nötig.</p>
+                <form method="post" action="<?php echo esc_url($cleanupUrl); ?>" style="margin:0">
+                    <input type="hidden" name="action" value="newss_cleanup_stuck">
+                    <input type="hidden" name="threshold" value="900">
+                    <?php wp_nonce_field('newss_cleanup_stuck'); ?>
+                    <button type="submit" class="button button-small"
+                            onclick="return confirm('Jobs die laenger als 15 Min. auf in-progress stehen als failed markieren und zugehoerige Locks freigeben?');">
+                        Stuck-Jobs aufräumen (&gt; 15 Min.)
+                    </button>
+                </form>
+            </div>
         </div>
         <script>
         (function(){
@@ -331,15 +346,20 @@ final class Status
                         list.innerHTML = '';
                         running.forEach(function(j){
                             var li = document.createElement('li');
-                            li.style.cssText = 'padding:8px 10px;margin:6px 0;background:#fff;border:1px solid #dcdcde;border-radius:3px';
+                            var bg = j.stale ? '#ffe6e6' : '#fff';
+                            var border = j.stale ? '#c00' : '#dcdcde';
+                            li.style.cssText = 'padding:8px 10px;margin:6px 0;background:' + bg + ';border:1px solid ' + border + ';border-radius:3px';
+                            var ageColor = j.stale ? '#c00' : '#666';
+                            var staleBadge = j.stale ? ' <span style="background:#c00;color:#fff;padding:1px 6px;border-radius:2px;font-size:10px;font-weight:600">STUCK</span>' : '';
                             li.innerHTML =
                                 '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">' +
-                                  '<strong>' + escapeHtml(j.video_title || j.video_id) + '</strong>' +
-                                  '<span style="font-size:11px;color:#666;white-space:nowrap">' + escapeHtml(j.started_ago) + '</span>' +
+                                  '<strong>' + escapeHtml(j.video_title || j.video_id) + '</strong>' + staleBadge +
+                                  '<span style="font-size:11px;color:' + ageColor + ';white-space:nowrap;font-weight:' + (j.stale ? '600' : 'normal') + '">' + escapeHtml(j.started_ago) + '</span>' +
                                 '</div>' +
                                 '<div style="font-size:11px;color:#666;margin-top:2px">' +
                                   escapeHtml(j.channel) +
                                   ' · <a href="https://www.youtube.com/watch?v=' + encodeURIComponent(j.video_id) + '" target="_blank" rel="noopener">' + escapeHtml(j.video_id) + '</a>' +
+                                  ' · Action #' + j.action_id +
                                 '</div>' +
                                 (j.last_log
                                   ? '<div style="font-size:11px;color:#0040b0;margin-top:4px;font-family:monospace">' + escapeHtml(j.last_log) + '</div>'
