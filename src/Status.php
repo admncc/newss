@@ -240,8 +240,12 @@ final class Status
                 return $out;
             }
 
-            $logsMap = self::lookupLogsByActionIds(array_map('intval', $runningIds));
-            $createdMap = self::lookupCreatedDates(array_map('intval', $runningIds));
+            $logsMap     = self::lookupLogsByActionIds(array_map('intval', $runningIds));
+            // last_attempt_gmt = wann der Worker den Job geclaimt+gestartet
+            // hat. Das ist das relevante Datum fuer 'wie lange laeuft das
+            // schon' und fuer Stuck-Detection -- NICHT scheduled_date_gmt
+            // (= Enqueue-Zeitpunkt, kann Stunden vorher sein wenn Queue voll).
+            $startedMap  = self::lookupLastAttemptDates(array_map('intval', $runningIds));
 
             foreach ($runningIds as $aid) {
                 $aid = (int) $aid;
@@ -256,9 +260,9 @@ final class Status
                 $logs = $logsMap[$aid] ?? [];
                 $lastLog = $logs ? end($logs) : null;
                 $startedTs = 0;
-                if (isset($createdMap[$aid])) {
+                if (isset($startedMap[$aid])) {
                     try {
-                        $startedTs = (new \DateTime($createdMap[$aid], new \DateTimeZone('UTC')))->getTimestamp();
+                        $startedTs = (new \DateTime($startedMap[$aid], new \DateTimeZone('UTC')))->getTimestamp();
                     } catch (\Throwable) {}
                 }
                 $ageSec = $startedTs > 0 ? max(0, time() - $startedTs) : 0;
@@ -1058,6 +1062,33 @@ final class Status
         $map = [];
         foreach ($rows as $row) {
             $map[(int) $row['action_id']] = (string) $row['scheduled_date_gmt'];
+        }
+        return $map;
+    }
+
+    /**
+     * @param int[] $actionIds
+     * @return array<int,string> map action_id -> last_attempt_gmt (UTC, leer wenn nie gestartet)
+     */
+    private static function lookupLastAttemptDates(array $actionIds): array
+    {
+        if ($actionIds === []) {
+            return [];
+        }
+        global $wpdb;
+        $ids = array_map('intval', $actionIds);
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $sql = $wpdb->prepare(
+            "SELECT action_id, last_attempt_gmt FROM {$wpdb->prefix}actionscheduler_actions WHERE action_id IN ($placeholders)",
+            $ids
+        );
+        $rows = $wpdb->get_results($sql, ARRAY_A) ?: [];
+        $map = [];
+        foreach ($rows as $row) {
+            $val = (string) ($row['last_attempt_gmt'] ?? '');
+            if ($val !== '' && $val !== '0000-00-00 00:00:00') {
+                $map[(int) $row['action_id']] = $val;
+            }
         }
         return $map;
     }

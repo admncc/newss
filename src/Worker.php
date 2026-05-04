@@ -155,13 +155,18 @@ final class Worker
         $actionsTable = $wpdb->prefix . 'actionscheduler_actions';
         $cutoffGmt = gmdate('Y-m-d H:i:s', time() - $thresholdSec);
 
+        // last_attempt_gmt = wann der Worker zuletzt geclaimt+gestartet hat.
+        // Wir nehmen NUR Actions die wirklich seit X Min. laufen, nicht
+        // welche die nur lange in der Queue warten.
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT action_id, args, scheduled_date_gmt, claim_id
+            "SELECT action_id, args, scheduled_date_gmt, last_attempt_gmt, claim_id
              FROM {$actionsTable}
              WHERE hook = %s
                AND status = %s
-               AND scheduled_date_gmt <= %s
-             ORDER BY scheduled_date_gmt ASC
+               AND last_attempt_gmt IS NOT NULL
+               AND last_attempt_gmt <> '0000-00-00 00:00:00'
+               AND last_attempt_gmt <= %s
+             ORDER BY last_attempt_gmt ASC
              LIMIT 100",
             self::HOOK_PROCESS,
             'in-progress',
@@ -175,7 +180,7 @@ final class Worker
             $videoId = (string) ($payload['video_id'] ?? '');
             $title   = (string) ($payload['video_title'] ?? '');
 
-            $age = max(0, time() - (new \DateTime((string) $row['scheduled_date_gmt'], new \DateTimeZone('UTC')))->getTimestamp());
+            $age = max(0, time() - (new \DateTime((string) $row['last_attempt_gmt'], new \DateTimeZone('UTC')))->getTimestamp());
 
             // Direkter UPDATE — funktioniert auch wenn claim_id != 0
             $updated = $wpdb->update(
