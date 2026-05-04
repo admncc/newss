@@ -171,6 +171,12 @@ final class Settings
             'autoload'          => false,
         ]);
 
+        register_setting(self::OPTION_GROUP, 'newss_youtube_api_key', [
+            'sanitize_callback' => 'sanitize_text_field',
+            'default'           => '',
+            'autoload'          => false,
+        ]);
+
         $opts = [
             'newss_anthropic_model'        => 'sanitize_text_field',
             'newss_anthropic_max_tokens'   => 'absint',
@@ -395,6 +401,18 @@ final class Settings
 
                 <h2>YouTube-Zugriff (Proxy-Rotation)</h2>
                 <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><label for="newss_youtube_api_key">YouTube Data API Key</label></th>
+                        <td>
+                            <input type="password" id="newss_youtube_api_key" name="newss_youtube_api_key" value="<?php echo esc_attr((string) get_option('newss_youtube_api_key', '')); ?>" class="regular-text" autocomplete="off">
+                            <p class="description">
+                                <strong>Empfohlen.</strong> Wenn gesetzt, werden Channel-Updates über die offizielle <code>playlistItems.list</code>-API geholt — ~1 Quota-Unit pro Channel-Poll, 10.000 Free pro Tag.
+                                Wesentlich zuverlässiger als der RSS-Feed (kein Rate-Limit, keine Proxy-Drossel).<br>
+                                Key erstellen: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">console.cloud.google.com/apis/credentials</a> → Create API Key → bei „YouTube Data API v3" aktivieren.<br>
+                                Leer lassen = Fallback auf RSS-Feed (mit Proxy + Retry).
+                            </p>
+                        </td>
+                    </tr>
                     <tr>
                         <th scope="row"><label for="newss_youtube_proxy">Proxy-Liste</label></th>
                         <td>

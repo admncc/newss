@@ -54,9 +54,93 @@ final class RssPoller
 
     private static function pollChannel(array $channel): int
     {
+        $channelId = (string) $channel['id'];
+        $apiKey    = trim((string) get_option('newss_youtube_api_key', ''));
+
+        $videos = $apiKey !== ''
+            ? self::fetchViaApi($channelId, $apiKey)
+            : self::fetchViaRss($channelId);
+
+        $enqueued = 0;
+        foreach ($videos as $video) {
+            if (self::videoAlreadyHandled($video['id'])) {
+                continue;
+            }
+            set_transient(Worker::pendingTransientKey($video['id']), 1, DAY_IN_SECONDS);
+            \as_enqueue_async_action(
+                Worker::HOOK_PROCESS,
+                [[
+                    'video_id'     => $video['id'],
+                    'video_title'  => $video['title'],
+                    'channel_id'   => $channelId,
+                    'channel_name' => (string) ($channel['name'] ?? ''),
+                    'category_id'  => (int) ($channel['category'] ?? 0),
+                    'published'    => $video['published'],
+                ]],
+                'newss'
+            );
+            $enqueued++;
+        }
+        return $enqueued;
+    }
+
+    /**
+     * @return array<int,array{id:string,title:string,published:string}>
+     */
+    private static function fetchViaApi(string $channelId, string $apiKey): array
+    {
+        if (!preg_match('/^UC[A-Za-z0-9_-]{22}$/', $channelId)) {
+            throw new \RuntimeException('Invalid channel id format: ' . $channelId);
+        }
+        $uploadsPlaylist = 'UU' . substr($channelId, 2);
+        $url = add_query_arg([
+            'part'       => 'snippet,contentDetails',
+            'playlistId' => $uploadsPlaylist,
+            'maxResults' => 15,
+            'key'        => $apiKey,
+        ], 'https://www.googleapis.com/youtube/v3/playlistItems');
+
+        $response = wp_remote_get($url, [
+            'timeout' => 30,
+            'headers' => ['Accept' => 'application/json'],
+        ]);
+        if (is_wp_error($response)) {
+            throw new \RuntimeException('YT-API network error: ' . $response->get_error_message());
+        }
+        $code = (int) wp_remote_retrieve_response_code($response);
+        $body = (string) wp_remote_retrieve_body($response);
+        if ($code !== 200) {
+            $errMsg = '';
+            $j = json_decode($body, true);
+            if (is_array($j) && isset($j['error']['message'])) {
+                $errMsg = ': ' . $j['error']['message'];
+            }
+            throw new \RuntimeException('YT-API HTTP ' . $code . $errMsg);
+        }
+        $data = json_decode($body, true);
+        if (!is_array($data) || !isset($data['items'])) {
+            return [];
+        }
+        $out = [];
+        foreach ($data['items'] as $item) {
+            $videoId = (string) ($item['contentDetails']['videoId'] ?? '');
+            $title   = (string) ($item['snippet']['title'] ?? '');
+            $pub     = (string) ($item['snippet']['publishedAt'] ?? '');
+            if ($videoId !== '') {
+                $out[] = ['id' => $videoId, 'title' => $title, 'published' => $pub];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @return array<int,array{id:string,title:string,published:string}>
+     */
+    private static function fetchViaRss(string $channelId): array
+    {
         $url = sprintf(
             'https://www.youtube.com/feeds/videos.xml?channel_id=%s',
-            rawurlencode((string) $channel['id'])
+            rawurlencode($channelId)
         );
 
         $maxAttempts = 3;
@@ -78,7 +162,6 @@ final class RssPoller
             if ($lastCode === 200) {
                 break;
             }
-            // 404 / 500 / 503: wahrscheinlich Proxy-Drossel -> erneut mit anderem Proxy
             if (($lastCode === 404 || $lastCode >= 500) && $attempt < $maxAttempts) {
                 usleep(1500 * 1000 * $attempt);
                 continue;
@@ -88,30 +171,7 @@ final class RssPoller
         if ($lastCode !== 200) {
             throw new \RuntimeException('RSS HTTP ' . $lastCode . ' nach ' . $maxAttempts . ' Versuchen');
         }
-
-        $videos = self::parseFeed((string) wp_remote_retrieve_body($response));
-
-        $enqueued = 0;
-        foreach ($videos as $video) {
-            if (self::videoAlreadyHandled($video['id'])) {
-                continue;
-            }
-            set_transient(Worker::pendingTransientKey($video['id']), 1, DAY_IN_SECONDS);
-            \as_enqueue_async_action(
-                Worker::HOOK_PROCESS,
-                [[
-                    'video_id'     => $video['id'],
-                    'video_title'  => $video['title'],
-                    'channel_id'   => (string) $channel['id'],
-                    'channel_name' => (string) ($channel['name'] ?? ''),
-                    'category_id'  => (int) ($channel['category'] ?? 0),
-                    'published'    => $video['published'],
-                ]],
-                'newss'
-            );
-            $enqueued++;
-        }
-        return $enqueued;
+        return self::parseFeed((string) wp_remote_retrieve_body($response));
     }
 
     private static function parseFeed(string $xml): array
