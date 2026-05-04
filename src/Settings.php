@@ -22,7 +22,253 @@ final class Settings
         add_action('admin_init', [self::class, 'registerSettings']);
         add_action('admin_post_newss_run_now', [self::class, 'handleRunNow']);
         add_action('admin_post_newss_test_whisper', [self::class, 'handleTestWhisper']);
+        add_action('admin_post_newss_test_anthropic', [self::class, 'handleTestAnthropic']);
+        add_action('admin_post_newss_test_youtube', [self::class, 'handleTestYoutube']);
+        add_action('admin_post_newss_test_supadata', [self::class, 'handleTestSupadata']);
         add_action('wp_ajax_newss_poll_progress', [self::class, 'handleAjaxPollProgress']);
+    }
+
+    public static function handleTestAnthropic(): void
+    {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('newss_test_anthropic');
+        $key = sanitize_text_field(wp_unslash((string) ($_POST['anthropic_key'] ?? '')));
+        $src = 'eingegeben';
+        if ($key === '') { $key = (string) get_option('newss_anthropic_api_key', ''); $src = 'gespeichert'; }
+        $lines = self::testInit($src, $key, 'GET https://api.anthropic.com/v1/models');
+        if ($key === '') {
+            self::testFinish('newss_anthropic_test', 'newss-claude', 'error', $lines, 'Kein Key — Feld leer + DB leer.');
+        }
+        $start = microtime(true);
+        $resp = wp_remote_get('https://api.anthropic.com/v1/models', [
+            'timeout' => 20,
+            'headers' => ['x-api-key' => $key, 'anthropic-version' => '2023-06-01'],
+        ]);
+        $lines[] = sprintf('Dauer: %d ms', (int) round((microtime(true) - $start) * 1000));
+        if (is_wp_error($resp)) {
+            $lines[] = 'Network-Fehler: ' . $resp->get_error_code() . ' — ' . $resp->get_error_message();
+            self::testFinish('newss_anthropic_test', 'newss-claude', 'error', $lines);
+        }
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        $body = (string) wp_remote_retrieve_body($resp);
+        $lines[] = 'HTTP-Status: ' . $code;
+        if ($code === 200) {
+            $data = json_decode($body, true);
+            $models = is_array($data) && isset($data['data']) ? array_map(static fn($m) => (string) ($m['id'] ?? ''), $data['data']) : [];
+            $hasSonnet = (bool) array_filter($models, static fn(string $id): bool => str_contains($id, 'sonnet'));
+            $lines[] = 'Modelle erreichbar: ' . count($models);
+            if ($models) $lines[] = 'Beispiele: ' . implode(', ', array_slice($models, 0, 5));
+            self::testFinish('newss_anthropic_test', 'newss-claude', $hasSonnet ? 'success' : 'warning', $lines);
+        }
+        $err = self::extractApiError($body);
+        $lines = array_merge($lines, $err['lines']);
+        $lines[] = '→ Hinweis: ' . match ($err['code']) {
+            'authentication_error' => 'Key falsch / widerrufen / Format-Fehler.',
+            'permission_error'     => 'Account-Permission fehlt — Anthropic-Console prüfen.',
+            'rate_limit_error'     => 'Rate-Limit überschritten — kurz warten.',
+            'invalid_request_error'=> 'Anfrage-Fehler — eventuell falsche Anthropic-Version-Header.',
+            default                => 'Wenn Key OK aussieht: Console > Settings > API Keys prüfen.',
+        };
+        self::testFinish('newss_anthropic_test', 'newss-claude', 'error', $lines);
+    }
+
+    public static function handleTestYoutube(): void
+    {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('newss_test_youtube');
+        $key = sanitize_text_field(wp_unslash((string) ($_POST['youtube_key'] ?? '')));
+        $src = 'eingegeben';
+        if ($key === '') { $key = (string) get_option('newss_youtube_api_key', ''); $src = 'gespeichert'; }
+        $lines = self::testInit($src, $key, 'GET channels.list?id=UCBR8-...');
+        if ($key === '') {
+            self::testFinish('newss_youtube_test', 'newss-youtube', 'error', $lines, 'Kein Key — Feld leer + DB leer.');
+        }
+        $start = microtime(true);
+        $url = add_query_arg([
+            'part' => 'snippet',
+            'id'   => 'UCBR8-60-B28hp2BmDPdntcQ',
+            'key'  => $key,
+        ], 'https://www.googleapis.com/youtube/v3/channels');
+        $resp = wp_remote_get($url, ['timeout' => 20]);
+        $lines[] = sprintf('Dauer: %d ms', (int) round((microtime(true) - $start) * 1000));
+        if (is_wp_error($resp)) {
+            $lines[] = 'Network-Fehler: ' . $resp->get_error_code() . ' — ' . $resp->get_error_message();
+            self::testFinish('newss_youtube_test', 'newss-youtube', 'error', $lines);
+        }
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        $body = (string) wp_remote_retrieve_body($resp);
+        $lines[] = 'HTTP-Status: ' . $code;
+        if ($code === 200) {
+            $data = json_decode($body, true);
+            $title = $data['items'][0]['snippet']['title'] ?? '';
+            $lines[] = 'Test-Channel aufgelöst: ' . ($title ?: '(kein Titel)');
+            self::testFinish('newss_youtube_test', 'newss-youtube', 'success', $lines);
+        }
+        $err = self::extractGoogleError($body);
+        $lines = array_merge($lines, $err['lines']);
+        $lines[] = '→ Hinweis: ' . match ($err['reason']) {
+            'API_KEY_INVALID', 'keyInvalid'     => 'Key falsch oder widerrufen.',
+            'ipRefererBlocked', 'API_KEY_HTTP_REFERRER_BLOCKED' => 'Key-Restriction blockiert deine Server-IP.',
+            'accessNotConfigured'                => 'YouTube Data API v3 ist im Project nicht aktiviert.',
+            'quotaExceeded', 'dailyLimitExceeded'=> 'Quota erschöpft — Pacific Midnight resetten.',
+            default                              => 'Permissions im Google-Cloud-Project prüfen.',
+        };
+        self::testFinish('newss_youtube_test', 'newss-youtube', 'error', $lines);
+    }
+
+    public static function handleTestSupadata(): void
+    {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('newss_test_supadata');
+        $key = sanitize_text_field(wp_unslash((string) ($_POST['supadata_key'] ?? '')));
+        $src = 'eingegeben';
+        if ($key === '') { $key = (string) get_option('newss_supadata_api_key', ''); $src = 'gespeichert'; }
+        $lines = self::testInit($src, $key, 'GET supadata.ai/v1/youtube/transcript');
+        if ($key === '') {
+            self::testFinish('newss_supadata_test', 'newss-transcript', 'error', $lines, 'Kein Key — Feld leer + DB leer.');
+        }
+        $start = microtime(true);
+        // jNQXAC9IVRw = "Me at the zoo", erstes YouTube-Video, hat Captions
+        $url = add_query_arg([
+            'url'  => 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+            'lang' => 'en',
+            'text' => 'true',
+        ], 'https://api.supadata.ai/v1/youtube/transcript');
+        $resp = wp_remote_get($url, ['timeout' => 30, 'headers' => ['x-api-key' => $key]]);
+        $lines[] = sprintf('Dauer: %d ms', (int) round((microtime(true) - $start) * 1000));
+        if (is_wp_error($resp)) {
+            $lines[] = 'Network-Fehler: ' . $resp->get_error_code() . ' — ' . $resp->get_error_message();
+            self::testFinish('newss_supadata_test', 'newss-transcript', 'error', $lines);
+        }
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        $body = (string) wp_remote_retrieve_body($resp);
+        $lines[] = 'HTTP-Status: ' . $code;
+        if ($code === 200) {
+            $data = json_decode($body, true);
+            $text = (string) ($data['content'] ?? $data['text'] ?? '');
+            $lines[] = 'Transkript-Länge: ' . strlen($text) . ' Zeichen';
+            if ($text) $lines[] = 'Snippet: ' . substr($text, 0, 100);
+            self::testFinish('newss_supadata_test', 'newss-transcript', $text !== '' ? 'success' : 'warning', $lines);
+        }
+        $err = self::extractApiError($body);
+        $lines = array_merge($lines, $err['lines']);
+        $lines[] = '→ Hinweis: ' . match ($err['code']) {
+            'invalid-request', 'unauthorized' => 'Key falsch oder fehlt.',
+            'limit-exceeded'                   => 'Plan-Limit erreicht — Subscription upgraden oder warten.',
+            'forbidden'                        => 'Geo-Block — Supadata kann das Video aus seiner Region nicht abrufen.',
+            'transcript-unavailable'           => 'Test-Video hat keine Captions — Key war OK, war nur ein Pech-Test.',
+            default                            => 'Supadata-Doku & Account-Status prüfen.',
+        };
+        self::testFinish('newss_supadata_test', 'newss-transcript', 'error', $lines);
+    }
+
+    private static function testInit(string $src, string $key, string $endpoint): array
+    {
+        return [
+            'Key-Quelle: ' . $src,
+            'Key-Prefix: ' . substr($key, 0, 6) . '… (Länge: ' . strlen($key) . ')',
+            'Endpunkt: ' . $endpoint,
+        ];
+    }
+
+    private static function extractApiError(string $body): array
+    {
+        $data = json_decode($body, true);
+        $msg = $code = $type = '';
+        if (is_array($data) && isset($data['error'])) {
+            if (is_array($data['error'])) {
+                $msg = (string) ($data['error']['message'] ?? '');
+                $code = (string) ($data['error']['code'] ?? $data['error']['type'] ?? '');
+                $type = (string) ($data['error']['type'] ?? '');
+            } else {
+                $code = (string) $data['error'];
+                $msg = (string) ($data['message'] ?? '');
+            }
+        }
+        return [
+            'code' => $code,
+            'lines' => [
+                'error.code: ' . ($code ?: '—'),
+                'error.type: ' . ($type ?: '—'),
+                'error.message: ' . ($msg ?: '(keine)'),
+                'Body-Auszug: ' . substr($body, 0, 400),
+            ],
+        ];
+    }
+
+    private static function extractGoogleError(string $body): array
+    {
+        $data = json_decode($body, true);
+        $reason = $msg = '';
+        if (is_array($data) && isset($data['error'])) {
+            $msg = (string) ($data['error']['message'] ?? '');
+            if (is_array($data['error']['errors'] ?? null)) {
+                $reason = (string) ($data['error']['errors'][0]['reason'] ?? '');
+            }
+            if ($reason === '' && isset($data['error']['status'])) {
+                $reason = (string) $data['error']['status'];
+            }
+        }
+        return [
+            'reason' => $reason,
+            'lines' => [
+                'error.reason: ' . ($reason ?: '—'),
+                'error.message: ' . ($msg ?: '(keine)'),
+                'Body-Auszug: ' . substr($body, 0, 400),
+            ],
+        ];
+    }
+
+    private static function testFinish(string $transientKey, string $page, string $type, array $lines, ?string $msg = null): void
+    {
+        if ($msg !== null) {
+            $lines = [$msg];
+        }
+        set_transient($transientKey, ['type' => $type, 'lines' => $lines], 120);
+        self::redirectTo($page);
+    }
+
+    /**
+     * Rendert Button + Result-Box. Form-Submit nimmt aktuellen Input-Value
+     * (per JS-Snapshot ins hidden field) damit man auch ohne Save testen kann.
+     */
+    private static function renderApiTestButton(string $action, string $nonceKey, string $hiddenFieldName, string $inputId, string $transientKey, string $hint = ''): void
+    {
+        $notice = get_transient($transientKey);
+        if ($notice) delete_transient($transientKey);
+        $formId = $action . '_form';
+        $snapId = $action . '_snap';
+        ?>
+        <div style="margin-top:8px">
+            <button type="button" class="button" onclick="(function(){var s=document.getElementById('<?php echo esc_js($snapId); ?>');var i=document.getElementById('<?php echo esc_js($inputId); ?>');s.value=i.value;document.getElementById('<?php echo esc_js($formId); ?>').submit();})();">Key testen</button>
+            <?php if ($hint !== ''): ?>
+                <span class="description">— <?php echo esc_html($hint); ?></span>
+            <?php endif; ?>
+        </div>
+        <?php if (is_array($notice) && !empty($notice['lines'])): ?>
+            <div class="notice notice-<?php echo esc_attr((string) $notice['type']); ?> inline" style="margin-top:10px;padding:10px 14px">
+                <p style="margin:0 0 6px 0"><strong>Test-Ergebnis:</strong></p>
+                <pre style="margin:0;background:#f6f7f7;padding:8px;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all"><?php
+                    foreach ((array) $notice['lines'] as $line) {
+                        echo esc_html((string) $line) . "\n";
+                    }
+                ?></pre>
+            </div>
+        <?php endif; ?>
+        <?php
+    }
+
+    private static function renderApiTestHiddenForm(string $action, string $nonceKey, string $hiddenFieldName): void
+    {
+        $formId = $action . '_form';
+        $snapId = $action . '_snap';
+        ?>
+        <form id="<?php echo esc_attr($formId); ?>" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:none">
+            <input type="hidden" name="action" value="<?php echo esc_attr($action); ?>">
+            <input type="hidden" name="<?php echo esc_attr($hiddenFieldName); ?>" value="" id="<?php echo esc_attr($snapId); ?>">
+            <?php wp_nonce_field($nonceKey); ?>
+        </form>
+        <?php
     }
 
     public static function handleAjaxPollProgress(): void
@@ -495,7 +741,10 @@ final class Settings
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row"><label for="newss_anthropic_api_key">API-Key</label></th>
-                        <td><input type="password" id="newss_anthropic_api_key" name="newss_anthropic_api_key" value="<?php echo esc_attr($apiKey); ?>" class="regular-text" autocomplete="off"></td>
+                        <td>
+                            <input type="password" id="newss_anthropic_api_key" name="newss_anthropic_api_key" value="<?php echo esc_attr($apiKey); ?>" class="regular-text" autocomplete="off">
+                            <?php self::renderApiTestButton('newss_test_anthropic', 'newss_test_anthropic', 'anthropic_key', 'newss_anthropic_api_key', 'newss_anthropic_test', 'Test-Call gegen /v1/models'); ?>
+                        </td>
                     </tr>
                     <tr>
                         <th scope="row"><label for="newss_anthropic_model">Modell</label></th>
@@ -539,6 +788,7 @@ final class Settings
                 </table>
                 <?php submit_button(); ?>
             </form>
+            <?php self::renderApiTestHiddenForm('newss_test_anthropic', 'newss_test_anthropic', 'anthropic_key'); ?>
         </div>
         <?php
     }
@@ -581,6 +831,7 @@ final class Settings
                                     Key erstellen: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">console.cloud.google.com/apis/credentials</a>
                                     → Create API Key → YouTube Data API v3 aktivieren. Optional auf Server-IP einschränken.
                                 </p>
+                                <?php self::renderApiTestButton('newss_test_youtube', 'newss_test_youtube', 'youtube_key', 'newss_youtube_api_key', 'newss_youtube_test', 'Test-Call gegen channels.list'); ?>
                             </td>
                         </tr>
                     </table>
@@ -626,6 +877,7 @@ final class Settings
 
                 <?php submit_button(); ?>
             </form>
+            <?php self::renderApiTestHiddenForm('newss_test_youtube', 'newss_test_youtube', 'youtube_key'); ?>
         </div>
         <?php
     }
@@ -655,6 +907,7 @@ final class Settings
                         <td>
                             <input type="password" id="newss_supadata_api_key" name="newss_supadata_api_key" value="<?php echo esc_attr($supadataKey); ?>" class="regular-text" autocomplete="off">
                             <p class="description">Empfohlen für Cloud-Hosting. Account: <a href="https://supadata.ai" target="_blank" rel="noopener">supadata.ai</a>.</p>
+                            <?php self::renderApiTestButton('newss_test_supadata', 'newss_test_supadata', 'supadata_key', 'newss_supadata_api_key', 'newss_supadata_test', 'Test-Call mit kurzem YouTube-Video'); ?>
                         </td>
                     </tr>
                     <tr>
@@ -715,6 +968,7 @@ final class Settings
                 <input type="hidden" name="whisper_key" value="" id="newss-whisper-key-snapshot">
                 <?php wp_nonce_field('newss_test_whisper'); ?>
             </form>
+            <?php self::renderApiTestHiddenForm('newss_test_supadata', 'newss_test_supadata', 'supadata_key'); ?>
         </div>
         <?php
     }
