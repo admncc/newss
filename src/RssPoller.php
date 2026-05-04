@@ -178,9 +178,18 @@ final class RssPoller
         }
         if ($code !== 200) {
             $errMsg = '';
+            $errReason = '';
             $j = json_decode($body, true);
-            if (is_array($j) && isset($j['error']['message'])) {
-                $errMsg = ': ' . $j['error']['message'];
+            if (is_array($j) && isset($j['error'])) {
+                $errMsg = isset($j['error']['message']) ? ': ' . $j['error']['message'] : '';
+                if (is_array($j['error']['errors'] ?? null)) {
+                    $errReason = (string) ($j['error']['errors'][0]['reason'] ?? '');
+                }
+            }
+            if ($code === 403 && in_array($errReason, ['quotaExceeded', 'dailyLimitExceeded', 'rateLimitExceeded'], true)) {
+                $secondsUntilReset = self::secondsUntilPacificMidnight();
+                set_transient('newss_yt_quota_exhausted', time(), $secondsUntilReset);
+                error_log('[newss] YT-API Quota erschöpft, Reset in ' . $secondsUntilReset . 's');
             }
             throw new \RuntimeException('YT-API HTTP ' . $code . $errMsg);
         }
@@ -198,6 +207,21 @@ final class RssPoller
             }
         }
         return $out;
+    }
+
+    /**
+     * YouTube-Quota resettet täglich um Mitternacht Pacific Time.
+     * Liefert die Sekunden bis zum nächsten Reset.
+     */
+    private static function secondsUntilPacificMidnight(): int
+    {
+        try {
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('America/Los_Angeles'));
+            $next = $now->modify('+1 day')->setTime(0, 0, 0);
+            return max(60, $next->getTimestamp() - $now->getTimestamp());
+        } catch (\Throwable) {
+            return 8 * HOUR_IN_SECONDS;
+        }
     }
 
     /**
