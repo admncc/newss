@@ -150,14 +150,23 @@ final class Channels
                         </td>
                         <td>
                             <a href="<?php echo esc_url($editUrl); ?>" class="button button-small">Bearbeiten</a>
-                            <a href="<?php echo esc_url($delUrl); ?>" class="button button-small button-link-delete"
-                               onclick="return confirm('Kanal „<?php echo esc_js((string) $ch['name']); ?>" wirklich löschen?')">Löschen</a>
+                            <a href="<?php echo esc_url($delUrl); ?>" class="button button-small button-link-delete newss-delete-link" data-channel-name="<?php echo esc_attr((string) $ch['name']); ?>">Löschen</a>
                         </td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
             </table>
         <?php endif; ?>
+        <script>
+        document.addEventListener('click', function(e){
+            var link = e.target.closest('.newss-delete-link');
+            if (!link) return;
+            var name = link.getAttribute('data-channel-name') || 'diesen Kanal';
+            if (!confirm('Kanal „' + name + '" wirklich löschen?')) {
+                e.preventDefault();
+            }
+        });
+        </script>
         <hr style="margin:32px 0">
         <?php
     }

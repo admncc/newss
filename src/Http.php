@@ -18,7 +18,13 @@ final class Http
     {
         $args = self::injectYoutubeCookies($url, $args);
 
-        $proxies = self::loadProxies();
+        // Proxy nur für YouTube-Hauptdomains, NICHT für i.ytimg.com (Thumbnails)
+        // sonst verschwendet jeder Featured-Image-Download bezahlte Proxy-Bandbreite.
+        $useProxy = (bool) preg_match(
+            '#^https?://(?:[a-z0-9-]+\.)?youtube(?:-nocookie)?\.com/#i',
+            $url
+        );
+        $proxies = $useProxy ? self::loadProxies() : [];
         if ($proxies === []) {
             return wp_remote_get($url, $args);
         }

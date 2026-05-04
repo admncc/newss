@@ -12,44 +12,80 @@ final class RssPoller
         if (!is_array($channels) || $channels === []) {
             return;
         }
+        $enabled = array_values(array_filter($channels, static fn(array $c): bool => !empty($c['enabled']) && !empty($c['id'])));
+        if ($enabled === []) {
+            return;
+        }
+
+        // Mutex: verhindert parallele pollAll-Läufe (System-Cron + manueller AS-Trigger)
+        if (get_transient('newss_poll_running')) {
+            error_log('[newss] pollAll abort: another run in progress');
+            return;
+        }
+        set_transient('newss_poll_running', time(), 30 * MINUTE_IN_SECONDS);
+        update_option('newss_last_cron_run', time(), false);
+
+        update_option('newss_poll_progress', [
+            'started_at' => time(),
+            'total'      => count($enabled),
+            'done'       => 0,
+            'current'    => '',
+            'channels'   => [],
+        ], false);
 
         $stats = ['channels' => 0, 'new' => 0, 'errors' => 0];
         $perChannel = [];
 
-        $first = true;
-        foreach ($channels as $channel) {
-            if (empty($channel['enabled']) || empty($channel['id'])) {
-                continue;
+        try {
+            $first = true;
+            foreach ($enabled as $channel) {
+                if (!$first) {
+                    usleep(1500 * 1000);
+                }
+                $first = false;
+                $stats['channels']++;
+                $entry = [
+                    'id'    => (string) $channel['id'],
+                    'name'  => (string) ($channel['name'] ?? $channel['id']),
+                    'count' => 0,
+                    'ok'    => false,
+                    'error' => '',
+                ];
+                self::updateProgress($stats['channels'] - 1, $entry['name'], $perChannel);
+                try {
+                    $entry['count'] = self::pollChannel($channel);
+                    $entry['ok']    = true;
+                    $stats['new'] += $entry['count'];
+                } catch (\Throwable $e) {
+                    $entry['error'] = $e->getMessage();
+                    $stats['errors']++;
+                    error_log('[newss] poll error for ' . $entry['id'] . ': ' . $e->getMessage());
+                }
+                $perChannel[] = $entry;
+                self::updateProgress($stats['channels'], '', $perChannel);
             }
-            if (!$first) {
-                usleep(1500 * 1000); // 1.5s zwischen Channels — verhindert YT-Drossel
-            }
-            $first = false;
-            $stats['channels']++;
-            $entry = [
-                'id'    => (string) $channel['id'],
-                'name'  => (string) ($channel['name'] ?? $channel['id']),
-                'count' => 0,
-                'ok'    => false,
-                'error' => '',
-            ];
-            try {
-                $entry['count'] = self::pollChannel($channel);
-                $entry['ok']    = true;
-                $stats['new'] += $entry['count'];
-            } catch (\Throwable $e) {
-                $entry['error'] = $e->getMessage();
-                $stats['errors']++;
-                error_log('[newss] poll error for ' . $entry['id'] . ': ' . $e->getMessage());
-            }
-            $perChannel[] = $entry;
-        }
 
-        update_option('newss_last_poll', [
-            'time'     => time(),
-            'stats'    => $stats,
-            'channels' => $perChannel,
-        ], false);
+            update_option('newss_last_poll', [
+                'time'     => time(),
+                'stats'    => $stats,
+                'channels' => $perChannel,
+            ], false);
+        } finally {
+            delete_option('newss_poll_progress');
+            delete_transient('newss_poll_running');
+        }
+    }
+
+    private static function updateProgress(int $done, string $current, array $channels): void
+    {
+        $progress = get_option('newss_poll_progress', null);
+        if (!is_array($progress)) {
+            return;
+        }
+        $progress['done']     = $done;
+        $progress['current']  = $current;
+        $progress['channels'] = $channels;
+        update_option('newss_poll_progress', $progress, false);
     }
 
     private static function pollChannel(array $channel): int

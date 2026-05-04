@@ -22,6 +22,19 @@ final class Settings
         add_action('admin_init', [self::class, 'registerSettings']);
         add_action('admin_post_newss_run_now', [self::class, 'handleRunNow']);
         add_action('admin_post_newss_test_whisper', [self::class, 'handleTestWhisper']);
+        add_action('wp_ajax_newss_poll_progress', [self::class, 'handleAjaxPollProgress']);
+    }
+
+    public static function handleAjaxPollProgress(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Forbidden'], 403);
+        }
+        wp_send_json([
+            'in_progress' => (bool) get_option('newss_poll_progress', null),
+            'progress'    => get_option('newss_poll_progress', null),
+            'last_poll'   => get_option('newss_last_poll', null),
+        ]);
     }
 
     public static function addMenu(): void
@@ -147,7 +160,7 @@ final class Settings
             self::redirectTo(self::SLUG_TRANSCRIPT);
         }
 
-        $keyPrefix = substr($key, 0, 12);
+        $keyPrefix = substr($key, 0, 6);
         $keyLen    = strlen($key);
         $startedAt = microtime(true);
 
@@ -284,6 +297,56 @@ final class Settings
                 <code>0 */8 * * * curl -s <?php echo esc_html(home_url('/wp-cron.php?doing_wp_cron')); ?> &gt; /dev/null</code><br>
                 <code>define('DISABLE_WP_CRON', true);</code>
             </p>
+
+            <?php
+            $pollProgress = get_option('newss_poll_progress', null);
+            $ajaxUrl = admin_url('admin-ajax.php?action=newss_poll_progress');
+            ?>
+            <div id="newss-poll-progress-box" style="<?php echo is_array($pollProgress) ? '' : 'display:none'; ?>margin:16px 0;padding:14px 18px;border:1px solid #2271b1;border-left:4px solid #2271b1;background:#f0f6fc;max-width:880px">
+                <h2 style="margin:0 0 8px 0">Polling läuft …</h2>
+                <p style="margin:0 0 6px 0"><strong id="newss-progress-text">—</strong></p>
+                <div style="background:#dcdcde;height:10px;border-radius:4px;overflow:hidden">
+                    <div id="newss-progress-bar" style="background:#2271b1;height:100%;width:0%;transition:width 0.3s ease"></div>
+                </div>
+                <p style="margin:8px 0 0 0;font-size:11px;color:#666">Status aktualisiert sich alle 3 Sekunden — Page wird automatisch neu geladen wenn fertig.</p>
+            </div>
+
+            <script>
+            (function(){
+                var box = document.getElementById('newss-poll-progress-box');
+                var bar = document.getElementById('newss-progress-bar');
+                var txt = document.getElementById('newss-progress-text');
+                var ajaxUrl = '<?php echo esc_js($ajaxUrl); ?>';
+                var timer = null;
+
+                function tick() {
+                    fetch(ajaxUrl, {credentials: 'same-origin'})
+                        .then(function(r){ return r.json(); })
+                        .then(function(d){
+                            if (d.in_progress && d.progress) {
+                                box.style.display = '';
+                                var p = d.progress;
+                                var pct = p.total > 0 ? Math.round(p.done / p.total * 100) : 0;
+                                bar.style.width = pct + '%';
+                                txt.textContent = 'Kanal ' + p.done + ' / ' + p.total +
+                                    (p.current ? ' — gerade: ' + p.current : '');
+                            } else {
+                                if (box.style.display !== 'none') {
+                                    // Polling beendet — Reload zeigt finale Tabelle
+                                    location.reload();
+                                    return;
+                                }
+                                box.style.display = 'none';
+                            }
+                        })
+                        .catch(function(){ /* ignore */ });
+                }
+                if (box) {
+                    tick();
+                    timer = setInterval(tick, 3000);
+                }
+            })();
+            </script>
 
             <?php Status::renderChannelPoll(); ?>
 

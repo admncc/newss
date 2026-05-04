@@ -17,7 +17,7 @@ final class Anthropic
             return null;
         }
 
-        if (!self::reserveDailyQuota()) {
+        if (!self::canMakeCall()) {
             error_log('[newss] daily Anthropic call cap reached; skipping');
             return null;
         }
@@ -78,6 +78,7 @@ final class Anthropic
             $raw  = (string) wp_remote_retrieve_body($resp);
 
             if ($code === 200) {
+                self::recordSuccessfulCall();
                 break;
             }
 
@@ -110,9 +111,10 @@ final class Anthropic
     }
 
     /**
-     * Atomic daily cap: returns false if today's call limit is reached.
+     * Lese-Check VOR dem Call. Counter wird erst nach erfolgreichem 200 erhöht
+     * (siehe recordSuccessfulCall) — verhindert Quota-Verbrennen bei Network-Fail.
      */
-    private static function reserveDailyQuota(): bool
+    private static function canMakeCall(): bool
     {
         $cap = (int) get_option('newss_anthropic_daily_cap', 0);
         if ($cap <= 0) {
@@ -121,14 +123,32 @@ final class Anthropic
         $today = wp_date('Y-m-d');
         $opt   = get_option('newss_anthropic_calls_today', null);
         $count = (is_array($opt) && ($opt['date'] ?? '') === $today) ? (int) ($opt['count'] ?? 0) : 0;
-        if ($count >= $cap) {
-            return false;
+        return $count < $cap;
+    }
+
+    /**
+     * Atomic increment via MySQL GET_LOCK — schützt gegen Race zwischen parallelen Workern.
+     */
+    private static function recordSuccessfulCall(): void
+    {
+        global $wpdb;
+        $today = wp_date('Y-m-d');
+        $lockName = 'newss_quota_' . $today;
+        $got = $wpdb->get_var($wpdb->prepare("SELECT GET_LOCK(%s, 5)", $lockName));
+        if ((int) $got !== 1) {
+            // Konnte Lock nicht holen — fall-through ohne Increment (besser als blockieren)
+            return;
         }
-        update_option('newss_anthropic_calls_today', [
-            'date'  => $today,
-            'count' => $count + 1,
-        ], false);
-        return true;
+        try {
+            $opt   = get_option('newss_anthropic_calls_today', null);
+            $count = (is_array($opt) && ($opt['date'] ?? '') === $today) ? (int) ($opt['count'] ?? 0) : 0;
+            update_option('newss_anthropic_calls_today', [
+                'date'  => $today,
+                'count' => $count + 1,
+            ], false);
+        } finally {
+            $wpdb->query($wpdb->prepare("SELECT RELEASE_LOCK(%s)", $lockName));
+        }
     }
 
     private static function publishArticleTool(): array

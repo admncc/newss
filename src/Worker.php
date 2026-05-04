@@ -32,9 +32,21 @@ final class Worker
         }
 
         $lockKey = 'newss_lock_' . $videoId;
-        if (!add_option($lockKey, time(), '', 'no')) {
-            self::skip('parallel worker already processing', $videoId);
-            return;
+        $now = time();
+        if (!add_option($lockKey, $now, '', 'no')) {
+            $existing = (int) get_option($lockKey, 0);
+            if ($existing > 0 && ($now - $existing) > 600) {
+                // Stale Lock (>10 min) — vorheriger Worker ist gestorben ohne finally
+                error_log("[newss] stale lock cleared for {$videoId} (age " . ($now - $existing) . 's)');
+                delete_option($lockKey);
+                if (!add_option($lockKey, $now, '', 'no')) {
+                    self::skip('lock contention nach stale-cleanup', $videoId);
+                    return;
+                }
+            } else {
+                self::skip('parallel worker already processing', $videoId);
+                return;
+            }
         }
 
         try {
