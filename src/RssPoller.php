@@ -134,6 +134,9 @@ final class RssPoller
         if (!preg_match('/^UC[A-Za-z0-9_-]{22}$/', $channelId)) {
             throw new \RuntimeException('Invalid channel id format: ' . $channelId);
         }
+        if (get_transient('newss_yt_quota_exhausted')) {
+            throw new \RuntimeException('YT-API Daily-Quota erschöpft — wartet auf Reset (Pacific midnight)');
+        }
 
         $uploadsPlaylist = self::resolveUploadsPlaylist($channelId, $apiKey);
         if ($uploadsPlaylist === '') {

@@ -301,50 +301,78 @@ final class Settings
             <?php
             $pollProgress = get_option('newss_poll_progress', null);
             $ajaxUrl = admin_url('admin-ajax.php?action=newss_poll_progress');
+            $hasProgress = is_array($pollProgress);
             ?>
-            <div id="newss-poll-progress-box" style="<?php echo is_array($pollProgress) ? '' : 'display:none'; ?>margin:16px 0;padding:14px 18px;border:1px solid #2271b1;border-left:4px solid #2271b1;background:#f0f6fc;max-width:880px">
-                <h2 style="margin:0 0 8px 0">Polling läuft …</h2>
+            <div id="newss-poll-progress-box" style="display:<?php echo $hasProgress ? 'block' : 'none'; ?>;margin:16px 0;padding:14px 18px;border:1px solid #2271b1;border-left:4px solid #2271b1;background:#f0f6fc;max-width:880px">
+                <h2 style="margin:0 0 8px 0" id="newss-progress-heading">Polling läuft …</h2>
                 <p style="margin:0 0 6px 0"><strong id="newss-progress-text">—</strong></p>
                 <div style="background:#dcdcde;height:10px;border-radius:4px;overflow:hidden">
                     <div id="newss-progress-bar" style="background:#2271b1;height:100%;width:0%;transition:width 0.3s ease"></div>
                 </div>
-                <p style="margin:8px 0 0 0;font-size:11px;color:#666">Status aktualisiert sich alle 3 Sekunden — Page wird automatisch neu geladen wenn fertig.</p>
+                <p id="newss-progress-hint" style="margin:8px 0 0 0;font-size:11px;color:#666">
+                    Aktualisiert sich alle 3 Sekunden, kein Page-Reload nötig.
+                </p>
             </div>
 
             <script>
             (function(){
                 var box = document.getElementById('newss-poll-progress-box');
+                if (!box) return;
                 var bar = document.getElementById('newss-progress-bar');
                 var txt = document.getElementById('newss-progress-text');
-                var ajaxUrl = '<?php echo esc_js($ajaxUrl); ?>';
+                var hint = document.getElementById('newss-progress-hint');
+                var heading = document.getElementById('newss-progress-heading');
+                var ajaxUrl = <?php echo wp_json_encode($ajaxUrl); ?>;
+                var initiallyRunning = <?php echo $hasProgress ? 'true' : 'false'; ?>;
+                var wasRunning = initiallyRunning;
                 var timer = null;
+                var stopped = false;
+
+                function stop() {
+                    stopped = true;
+                    if (timer) { clearInterval(timer); timer = null; }
+                }
 
                 function tick() {
-                    fetch(ajaxUrl, {credentials: 'same-origin'})
-                        .then(function(r){ return r.json(); })
+                    if (stopped) return;
+                    fetch(ajaxUrl, {credentials: 'same-origin', cache: 'no-store'})
+                        .then(function(r){ return r.ok ? r.json() : null; })
                         .then(function(d){
+                            if (!d) return;
                             if (d.in_progress && d.progress) {
-                                box.style.display = '';
+                                wasRunning = true;
+                                box.style.display = 'block';
                                 var p = d.progress;
                                 var pct = p.total > 0 ? Math.round(p.done / p.total * 100) : 0;
                                 bar.style.width = pct + '%';
                                 txt.textContent = 'Kanal ' + p.done + ' / ' + p.total +
                                     (p.current ? ' — gerade: ' + p.current : '');
+                            } else if (wasRunning) {
+                                // War running, jetzt fertig — Box zu „Fertig"-State umschalten
+                                heading.textContent = 'Polling abgeschlossen';
+                                box.style.background = '#eaf7e6';
+                                box.style.borderColor = '#0a7';
+                                bar.style.width = '100%';
+                                bar.style.background = '#0a7';
+                                txt.textContent = 'Alle Kanäle verarbeitet.';
+                                hint.innerHTML = '<a href="' + window.location.href + '">Seite jetzt neu laden</a> um die aktualisierte Tabelle zu sehen.';
+                                stop();
                             } else {
-                                if (box.style.display !== 'none') {
-                                    // Polling beendet — Reload zeigt finale Tabelle
-                                    location.reload();
-                                    return;
-                                }
+                                // Nie gelaufen seit Page-Load — Box bleibt versteckt, Polling stoppt nach 1 Tick
                                 box.style.display = 'none';
+                                stop();
                             }
                         })
-                        .catch(function(){ /* ignore */ });
+                        .catch(function(){ /* network blip — beim nächsten Tick erneut */ });
                 }
-                if (box) {
-                    tick();
-                    timer = setInterval(tick, 3000);
-                }
+
+                // Bei initially-running: gleich tick + Interval starten.
+                // Bei nicht-running: 1× tick um zu prüfen ob inzwischen einer gestartet wurde, dann stop.
+                tick();
+                timer = setInterval(tick, 3000);
+
+                // Sicherheits-Stop nach 30 Min — verhindert Dauerschleife falls Backend hängt
+                setTimeout(stop, 30 * 60 * 1000);
             })();
             </script>
 
