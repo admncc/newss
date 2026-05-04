@@ -70,19 +70,83 @@ final class Settings
      */
     private static function runAsQueue(): void
     {
+        global $wpdb;
         if (!class_exists('\\ActionScheduler')) {
             return;
         }
-        // Stale AS-Lock-Transients aufraeumen die einen toten Vorgaenger-Run
-        // blockieren koennten
+
+        // 1) Stale AS-Lock-Transients/Optionen aufraeumen die einen toten
+        //    Vorgaenger-Run blockieren koennten
         delete_transient('action_scheduler_lock_runner');
         delete_transient('action_scheduler_lock_async-request-runner');
+        delete_option('action_scheduler_lock_runner');
+        delete_option('action_scheduler_lock_async-request-runner');
 
+        // 2) Stale Claims aus actionscheduler_claims loeschen (AS erlaubt
+        //    nur N parallele Batches; tote Claim-Rows blockieren Slots).
+        //    AS-Default-Claim-Timeout ist 5 Min., wir nehmen 5 Min.
+        $claimsTable  = $wpdb->prefix . 'actionscheduler_claims';
+        $actionsTable = $wpdb->prefix . 'actionscheduler_actions';
+        $cutoff = gmdate('Y-m-d H:i:s', time() - 5 * MINUTE_IN_SECONDS);
+
+        $staleClaims = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$claimsTable} WHERE date_created_gmt < %s",
+            $cutoff
+        ));
+        if ($staleClaims > 0) {
+            // Erst Actions die diese Claims referenzieren freigeben, dann Claims loeschen
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$actionsTable} a
+                 INNER JOIN {$claimsTable} c ON a.claim_id = c.claim_id
+                 SET a.claim_id = 0
+                 WHERE c.date_created_gmt < %s",
+                $cutoff
+            ));
+            $wpdb->query($wpdb->prepare(
+                "DELETE FROM {$claimsTable} WHERE date_created_gmt < %s",
+                $cutoff
+            ));
+            error_log('[newss] runAsQueue: cleared ' . $staleClaims . ' stale AS claims');
+        }
+
+        // 3) Orphan claim_id auf Actions wo Claim-Row gar nicht mehr existiert
+        $orphaned = (int) $wpdb->query(
+            "UPDATE {$actionsTable} a
+             LEFT JOIN {$claimsTable} c ON a.claim_id = c.claim_id
+             SET a.claim_id = 0
+             WHERE a.claim_id <> 0 AND c.claim_id IS NULL"
+        );
+        if ($orphaned > 0) {
+            error_log('[newss] runAsQueue: cleared ' . $orphaned . ' orphan claim_id refs');
+        }
+
+        // 4) Runner ausfuehren
         try {
-            \ActionScheduler::runner()->run('Newss-Manual-Queue');
-            error_log('[newss] runAsQueue: completed');
+            $count = \ActionScheduler::runner()->run('Newss-Manual-Queue');
+            error_log('[newss] runAsQueue: completed, processed ' . (int) $count . ' actions');
         } catch (\Throwable $e) {
             error_log('[newss] runAsQueue exception: ' . $e->getMessage());
+        }
+
+        // 5) Wenn nach dem ersten Lauf noch viele Pending: nochmal triggern,
+        //    AS verarbeitet pro run() nur batch_size Actions (default 25).
+        for ($i = 0; $i < 4; $i++) {
+            $pending = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$actionsTable}
+                 WHERE hook = %s AND status = %s
+                   AND scheduled_date_gmt <= %s
+                   AND claim_id = 0",
+                Worker::HOOK_PROCESS,
+                'pending',
+                gmdate('Y-m-d H:i:s')
+            ));
+            if ($pending === 0) break;
+            try {
+                \ActionScheduler::runner()->run('Newss-Manual-Queue-' . ($i + 2));
+            } catch (\Throwable $e) {
+                error_log('[newss] runAsQueue iter ' . $i . ' exception: ' . $e->getMessage());
+                break;
+            }
         }
     }
 
