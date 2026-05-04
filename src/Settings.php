@@ -231,8 +231,16 @@ final class Settings
             wp_die('Forbidden');
         }
         check_admin_referer('newss_run_now');
-        RssPoller::pollAll();
-        wp_safe_redirect(add_query_arg(['ran' => '1'], admin_url('admin.php?page=' . self::PAGE_SLUG)));
+
+        if (function_exists('as_enqueue_async_action')) {
+            \as_enqueue_async_action('newss_run_poll_now', [], 'newss');
+            $flag = 'queued';
+        } else {
+            RssPoller::pollAll();
+            $flag = 'sync';
+        }
+
+        wp_safe_redirect(add_query_arg(['ran' => $flag], admin_url('admin.php?page=' . self::PAGE_SLUG)));
         exit;
     }
 
@@ -279,8 +287,16 @@ final class Settings
         <div class="wrap">
             <h1>Newss – Einstellungen</h1>
 
-            <?php if (isset($_GET['ran'])): ?>
-                <div class="notice notice-success is-dismissible"><p>RSS-Polling wurde manuell ausgeführt.</p></div>
+            <?php if (isset($_GET['ran'])):
+                $ranFlag = sanitize_key((string) $_GET['ran']);
+                ?>
+                <div class="notice notice-success is-dismissible">
+                    <?php if ($ranFlag === 'queued'): ?>
+                        <p>RSS-Polling wurde in die Hintergrund-Queue gelegt — läuft jetzt asynchron. Reload in ~30–90 Sekunden für aktualisierten Status.</p>
+                    <?php else: ?>
+                        <p>RSS-Polling wurde ausgeführt.</p>
+                    <?php endif; ?>
+                </div>
             <?php endif; ?>
 
             <h2>Status</h2>

@@ -20,6 +20,7 @@ final class Cron
     {
         add_filter('cron_schedules', [self::class, 'addSchedule']);
         add_action(self::HOOK_PERIODIC, [RssPoller::class, 'pollAll']);
+        add_action('newss_run_poll_now', [RssPoller::class, 'pollAll']);
         add_action('init', [self::class, 'ensureScheduled']);
     }
 
