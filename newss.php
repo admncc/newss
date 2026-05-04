@@ -30,6 +30,15 @@ if (!file_exists($autoload)) {
 }
 require $autoload;
 
+// Action-Scheduler MUSS hier (vor plugins_loaded) geladen werden, nicht
+// in Plugin::boot(). AS registriert seine Init-Hooks auf plugins_loaded
+// Prio 0+1 -- wenn wir es erst spaeter requiren, sind die schon gefeuert
+// und AS initialisiert nie -> as_enqueue_async_action() bleibt undefiniert.
+$asFile = NEWSS_DIR . '/vendor/woocommerce/action-scheduler/action-scheduler.php';
+if (file_exists($asFile) && !function_exists('as_enqueue_async_action')) {
+    require_once $asFile;
+}
+
 register_activation_hook(__FILE__, [\Newss\Plugin::class, 'onActivate']);
 register_deactivation_hook(__FILE__, [\Newss\Plugin::class, 'onDeactivate']);
 

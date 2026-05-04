@@ -15,11 +15,8 @@ final class Plugin
 
     public function boot(): void
     {
-        $asFile = NEWSS_DIR . '/vendor/woocommerce/action-scheduler/action-scheduler.php';
-        if (file_exists($asFile) && !function_exists('as_enqueue_async_action')) {
-            require_once $asFile;
-        }
-
+        // Action-Scheduler wird in newss.php BEFORE plugins_loaded geladen
+        // (AS-Init-Hooks auf prio 0+1 — wenn wir hier erst loaden, zu spaet).
         add_filter('action_scheduler_retention_period', static fn(): int => 7 * DAY_IN_SECONDS);
         // Default-AS-Runner-Limit ist 30s -- pollAll mit 18 Channels +
         // Worker mit Whisper-Transcription brauchen deutlich mehr.
