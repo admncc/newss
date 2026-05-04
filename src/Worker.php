@@ -10,6 +10,11 @@ final class Worker
 
     private static int $currentActionId = 0;
 
+    public static function setCurrentActionId(int $actionId): void
+    {
+        self::$currentActionId = $actionId;
+    }
+
     public static function register(): void
     {
         add_action(self::HOOK_PROCESS, [self::class, 'processVideo'], 10, 1);

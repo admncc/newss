@@ -82,9 +82,7 @@ final class Settings
         delete_option('action_scheduler_lock_runner');
         delete_option('action_scheduler_lock_async-request-runner');
 
-        // 2) Stale Claims aus actionscheduler_claims loeschen (AS erlaubt
-        //    nur N parallele Batches; tote Claim-Rows blockieren Slots).
-        //    AS-Default-Claim-Timeout ist 5 Min., wir nehmen 5 Min.
+        // 2) Stale Claims aus actionscheduler_claims loeschen
         $claimsTable  = $wpdb->prefix . 'actionscheduler_claims';
         $actionsTable = $wpdb->prefix . 'actionscheduler_actions';
         $cutoff = gmdate('Y-m-d H:i:s', time() - 5 * MINUTE_IN_SECONDS);
@@ -94,7 +92,6 @@ final class Settings
             $cutoff
         ));
         if ($staleClaims > 0) {
-            // Erst Actions die diese Claims referenzieren freigeben, dann Claims loeschen
             $wpdb->query($wpdb->prepare(
                 "UPDATE {$actionsTable} a
                  INNER JOIN {$claimsTable} c ON a.claim_id = c.claim_id
@@ -120,34 +117,119 @@ final class Settings
             error_log('[newss] runAsQueue: cleared ' . $orphaned . ' orphan claim_id refs');
         }
 
-        // 4) Runner ausfuehren
-        try {
-            $count = \ActionScheduler::runner()->run('Newss-Manual-Queue');
-            error_log('[newss] runAsQueue: completed, processed ' . (int) $count . ' actions');
-        } catch (\Throwable $e) {
-            error_log('[newss] runAsQueue exception: ' . $e->getMessage());
-        }
+        // 4) Diagnose: wieviele Pending-Jobs sind ueberhaupt due?
+        $duePending = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$actionsTable}
+             WHERE hook = %s AND status = %s
+               AND scheduled_date_gmt <= %s
+               AND claim_id = 0",
+            Worker::HOOK_PROCESS,
+            'pending',
+            gmdate('Y-m-d H:i:s')
+        ));
+        error_log('[newss] runAsQueue: ' . $duePending . ' due+unclaimed Newss-jobs vor dem Run');
 
-        // 5) Wenn nach dem ersten Lauf noch viele Pending: nochmal triggern,
-        //    AS verarbeitet pro run() nur batch_size Actions (default 25).
-        for ($i = 0; $i < 4; $i++) {
-            $pending = (int) $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM {$actionsTable}
-                 WHERE hook = %s AND status = %s
-                   AND scheduled_date_gmt <= %s
-                   AND claim_id = 0",
-                Worker::HOOK_PROCESS,
-                'pending',
-                gmdate('Y-m-d H:i:s')
-            ));
-            if ($pending === 0) break;
+        // 5) AS-Runner versuchen (bevorzugt, da er Logging + Hooks korrekt durchfuehrt)
+        $totalProcessed = 0;
+        for ($i = 0; $i < 5; $i++) {
             try {
-                \ActionScheduler::runner()->run('Newss-Manual-Queue-' . ($i + 2));
+                $count = (int) \ActionScheduler::runner()->run('Newss-Manual-' . ($i + 1));
+                error_log('[newss] runAsQueue iter ' . ($i + 1) . ': AS-runner processed ' . $count);
+                $totalProcessed += $count;
+                if ($count === 0) break;
             } catch (\Throwable $e) {
-                error_log('[newss] runAsQueue iter ' . $i . ' exception: ' . $e->getMessage());
+                error_log('[newss] runAsQueue iter ' . ($i + 1) . ' exception: ' . $e->getMessage());
                 break;
             }
         }
+
+        // 6) Fallback: wenn AS nichts verarbeitet hat aber due-Jobs vorhanden
+        //    sind, direkt per SQL+processVideo-Call arbeiten (umgeht AS-Claim-
+        //    Mechanismus komplett -- letzte Notwehr)
+        if ($totalProcessed === 0 && $duePending > 0) {
+            error_log('[newss] runAsQueue: AS-runner inaktiv trotz ' . $duePending . ' due-jobs -- starte Direkt-Processor');
+            $direct = self::processPendingDirectly(25);
+            error_log('[newss] runAsQueue: Direkt-Processor erledigte ' . $direct);
+        }
+    }
+
+    /**
+     * AS umgehen: holt due-Pending-Newss-Jobs per direktem SQL, markiert
+     * sie in-progress, ruft Worker::processVideo direkt auf, markiert sie
+     * complete/failed. Logging an die AS-Log-Tabelle bleibt erhalten.
+     *
+     * Letzte Notwehr falls \ActionScheduler::runner()->run() durch interne
+     * Lock-/Concurrency-Logik blockiert.
+     */
+    private static function processPendingDirectly(int $maxActions): int
+    {
+        global $wpdb;
+        $actionsTable = $wpdb->prefix . 'actionscheduler_actions';
+        $processed = 0;
+
+        for ($i = 0; $i < $maxActions; $i++) {
+            $row = $wpdb->get_row($wpdb->prepare(
+                "SELECT action_id, args FROM {$actionsTable}
+                 WHERE hook = %s AND status = %s
+                   AND scheduled_date_gmt <= %s
+                   AND claim_id = 0
+                 ORDER BY scheduled_date_gmt ASC
+                 LIMIT 1",
+                Worker::HOOK_PROCESS,
+                'pending',
+                gmdate('Y-m-d H:i:s')
+            ), ARRAY_A);
+            if (!$row) {
+                break;
+            }
+            $aid = (int) $row['action_id'];
+
+            // Optimistic-Lock via UPDATE WHERE status='pending'
+            $claimed = (int) $wpdb->query($wpdb->prepare(
+                "UPDATE {$actionsTable}
+                 SET status = %s, last_attempt_gmt = %s
+                 WHERE action_id = %d AND status = %s",
+                'in-progress',
+                gmdate('Y-m-d H:i:s'),
+                $aid,
+                'pending'
+            ));
+            if ($claimed !== 1) {
+                continue; // jemand anderes hat ihn gerade gegriffen
+            }
+
+            $args = json_decode((string) $row['args'], true);
+            $payload = is_array($args) && isset($args[0]) ? (array) $args[0] : [];
+
+            Worker::setCurrentActionId($aid);
+            try {
+                if (class_exists('\\ActionScheduler') && method_exists('\\ActionScheduler', 'logger')) {
+                    @\ActionScheduler::logger()->log($aid, '[newss] direct-processor: starting');
+                }
+                Worker::processVideo($payload);
+                $wpdb->update(
+                    $actionsTable,
+                    ['status' => 'complete'],
+                    ['action_id' => $aid],
+                    ['%s'], ['%d']
+                );
+                $processed++;
+            } catch (\Throwable $e) {
+                error_log('[newss] direct-processor exception #' . $aid . ': ' . $e->getMessage());
+                $wpdb->update(
+                    $actionsTable,
+                    ['status' => 'failed'],
+                    ['action_id' => $aid],
+                    ['%s'], ['%d']
+                );
+                if (class_exists('\\ActionScheduler') && method_exists('\\ActionScheduler', 'logger')) {
+                    @\ActionScheduler::logger()->log($aid, '[newss] direct-processor exception: ' . $e->getMessage());
+                }
+            } finally {
+                Worker::setCurrentActionId(0);
+            }
+        }
+        return $processed;
     }
 
     public static function handleCleanupStuck(): void
