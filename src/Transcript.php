@@ -19,9 +19,23 @@ final class Transcript
 
     public string $lastProvider = '';
 
+    /**
+     * Pro-Provider-Diagnose des letzten fetch()-Calls.
+     * Format: [['provider'=>'supadata','ok'=>false,'detail'=>'HTTP 206'], ...]
+     *
+     * @var array<int,array{provider:string,ok:bool,detail:string}>
+     */
+    public array $attemptLog = [];
+
+    private function recordAttempt(string $provider, bool $ok, string $detail): void
+    {
+        $this->attemptLog[] = ['provider' => $provider, 'ok' => $ok, 'detail' => $detail];
+    }
+
     public function fetch(string $videoId): string
     {
         $this->lastProvider = '';
+        $this->attemptLog = [];
 
         $supadataKey = (string) get_option('newss_supadata_api_key', '');
         if ($supadataKey !== '') {
@@ -36,7 +50,10 @@ final class Transcript
                 }
             } catch (\Throwable $e) {
                 error_log('[newss] supadata fail, fallback: ' . $e->getMessage());
+                $this->recordAttempt('supadata', false, 'exception: ' . $e->getMessage());
             }
+        } else {
+            $this->recordAttempt('supadata', false, 'kein API-Key');
         }
 
         $text = $this->fetchYtDlp($videoId);
@@ -50,6 +67,8 @@ final class Transcript
                 $this->lastProvider = 'whisper';
                 return $text;
             }
+        } else {
+            $this->recordAttempt('whisper', false, 'deaktiviert');
         }
         return '';
     }
@@ -74,6 +93,7 @@ final class Transcript
             $msg = $resp->get_error_message();
             error_log('[newss] supadata error: ' . $msg);
             self::recordHealth('supadata', false, 'network: ' . $msg);
+            $this->recordAttempt('supadata', false, 'network: ' . $msg);
             return '';
         }
         $code = (int) wp_remote_retrieve_response_code($resp);
@@ -84,11 +104,13 @@ final class Transcript
             if ($code === 429 || $code >= 500) {
                 throw new \RuntimeException("Supadata HTTP {$code} — retryable");
             }
+            $this->recordAttempt('supadata', false, "HTTP {$code}");
             return '';
         }
         self::recordHealth('supadata', true, '');
         $data = json_decode($body, true);
         if (!is_array($data)) {
+            $this->recordAttempt('supadata', false, 'HTTP 200, kein JSON');
             return '';
         }
 
@@ -103,6 +125,9 @@ final class Transcript
         $text = trim(preg_replace('/\s+/', ' ', $text) ?? '');
         if ($text === '') {
             error_log("[newss] supadata 200-empty for {$videoId}: " . substr($body, 0, 200));
+            $this->recordAttempt('supadata', false, 'HTTP 200, leerer Transcript');
+        } else {
+            $this->recordAttempt('supadata', true, mb_strlen($text) . ' chars');
         }
         return $text;
     }
@@ -110,11 +135,13 @@ final class Transcript
     private function fetchYtDlp(string $videoId): string
     {
         if (!function_exists('shell_exec')) {
+            $this->recordAttempt('yt-dlp', false, 'shell_exec deaktiviert');
             return '';
         }
         $bin = (string) get_option('newss_ytdlp_path', 'yt-dlp');
         $tmpDir = $this->makeTmpDir();
         if ($tmpDir === '') {
+            $this->recordAttempt('yt-dlp', false, 'tmp-dir fail');
             return '';
         }
         $url = 'https://www.youtube.com/watch?v=' . $videoId;
@@ -128,11 +155,18 @@ final class Transcript
             escapeshellarg($tmpDir . '/sub'),
             escapeshellarg($url)
         );
-        @shell_exec($cmd);
+        $stdout = (string) @shell_exec($cmd);
 
         $files = glob($tmpDir . '/sub*.srt') ?: [];
         if (!$files) {
+            // Hint aus stdout extrahieren -- yt-dlp loggt z.B. 'Sign in to confirm
+            // you are not a bot' oder 'No subtitles found' direkt
+            $hint = '';
+            if (preg_match('/(Sign in to confirm|HTTP Error \d+|No subtitles|This live event|members-only|Video unavailable)[^\n]{0,80}/i', $stdout, $m)) {
+                $hint = ': ' . trim($m[0]);
+            }
             $this->cleanup($tmpDir);
+            $this->recordAttempt('yt-dlp', false, 'keine Captions' . $hint);
             return '';
         }
         usort($files, static fn(string $a, string $b): int =>
@@ -140,13 +174,24 @@ final class Transcript
         );
         $srt = (string) @file_get_contents($files[0]);
         $this->cleanup($tmpDir);
-        return $this->srtToText($srt);
+        $text = $this->srtToText($srt);
+        if ($text === '') {
+            $this->recordAttempt('yt-dlp', false, 'srt parsed, leer');
+        } else {
+            $this->recordAttempt('yt-dlp', true, mb_strlen($text) . ' chars');
+        }
+        return $text;
     }
 
     private function fetchWhisper(string $videoId): string
     {
         $apiKey = (string) get_option('newss_whisper_api_key', '');
-        if ($apiKey === '' || !function_exists('shell_exec')) {
+        if ($apiKey === '') {
+            $this->recordAttempt('whisper', false, 'kein API-Key');
+            return '';
+        }
+        if (!function_exists('shell_exec')) {
+            $this->recordAttempt('whisper', false, 'shell_exec deaktiviert');
             return '';
         }
 
@@ -158,6 +203,7 @@ final class Transcript
             if ($count >= $cap) {
                 error_log('[newss] whisper daily cap reached; skipping');
                 self::recordHealth('whisper', false, 'daily cap reached (' . $count . '/' . $cap . ')');
+                $this->recordAttempt('whisper', false, "Cap erreicht ({$count}/{$cap})");
                 return '';
             }
         }
@@ -165,6 +211,7 @@ final class Transcript
         $bin = (string) get_option('newss_ytdlp_path', 'yt-dlp');
         $tmpDir = $this->makeTmpDir();
         if ($tmpDir === '') {
+            $this->recordAttempt('whisper', false, 'tmp-dir fail');
             return '';
         }
         $url = 'https://www.youtube.com/watch?v=' . $videoId;
@@ -176,11 +223,16 @@ final class Transcript
             escapeshellarg($tmpDir . '/audio.%(ext)s'),
             escapeshellarg($url)
         );
-        @shell_exec($cmd);
+        $stdout = (string) @shell_exec($cmd);
 
         $files = glob($tmpDir . '/audio.mp3') ?: [];
         if (!$files) {
+            $hint = '';
+            if (preg_match('/(Sign in to confirm|HTTP Error \d+|This live event|members-only|Video unavailable)[^\n]{0,80}/i', $stdout, $m)) {
+                $hint = ': ' . trim($m[0]);
+            }
             $this->cleanup($tmpDir);
+            $this->recordAttempt('whisper', false, 'audio-download fail' . $hint);
             return '';
         }
         $mp3 = $files[0];
@@ -206,6 +258,7 @@ final class Transcript
             $msg = $resp->get_error_message();
             error_log('[newss] whisper error: ' . $msg);
             self::recordHealth('whisper', false, 'network: ' . $msg);
+            $this->recordAttempt('whisper', false, 'network: ' . $msg);
             return '';
         }
         $whCode = (int) wp_remote_retrieve_response_code($resp);
@@ -218,6 +271,7 @@ final class Transcript
                 $errCode = (string) $j['error']['code'];
             }
             self::recordHealth('whisper', false, "HTTP {$whCode}" . ($errCode ? " · {$errCode}" : ''));
+            $this->recordAttempt('whisper', false, "HTTP {$whCode}" . ($errCode ? " · {$errCode}" : ''));
             return '';
         }
         self::recordHealth('whisper', true, '');
@@ -228,7 +282,9 @@ final class Transcript
             $count = (is_array($opt) && ($opt['date'] ?? '') === $today) ? (int) ($opt['count'] ?? 0) : 0;
             update_option('newss_whisper_calls_today', ['date' => $today, 'count' => $count + 1], false);
         }
-        return trim((string) wp_remote_retrieve_body($resp));
+        $text = trim((string) wp_remote_retrieve_body($resp));
+        $this->recordAttempt('whisper', true, mb_strlen($text) . ' chars');
+        return $text;
     }
 
     private function srtToText(string $srt): string

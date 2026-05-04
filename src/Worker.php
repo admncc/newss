@@ -111,7 +111,8 @@ final class Worker
             $tx = new Transcript();
             $transcript = $tx->fetch($videoId);
             if ($transcript === '' || mb_strlen($transcript) < 50) {
-                self::skip('transcript missing/too-short (' . mb_strlen($transcript) . ' chars)', $videoId);
+                $diag = self::formatAttemptLog($tx->attemptLog);
+                self::handleEmptyTranscript($payload, $videoId, mb_strlen($transcript), $diag);
                 return;
             }
             self::log(sprintf('transcript via %s (%d chars)', $tx->lastProvider ?: 'unknown', mb_strlen($transcript)));
@@ -161,6 +162,76 @@ final class Worker
     public static function pendingTransientKey(string $videoId): string
     {
         return 'newss_pending_' . $videoId;
+    }
+
+    /**
+     * Wenn Transcript leer ist: pruefen ob Retry sinnvoll ist
+     * (Video < 24h alt UND Versuch < 3) und ggf. neue AS-Action in
+     * 2h bzw. 4h schedulen. Sonst permanent skippen.
+     */
+    private static function handleEmptyTranscript(array $payload, string $videoId, int $chars, string $diagnose): void
+    {
+        $attempt     = max(1, (int) ($payload['attempt'] ?? 1));
+        $publishedTs = self::parsePublishedTs((string) ($payload['published'] ?? ''));
+        $ageHours    = $publishedTs > 0 ? (time() - $publishedTs) / 3600 : 999;
+
+        $shouldRetry = $attempt < 3 && $ageHours < 24 && function_exists('as_schedule_single_action');
+        if ($shouldRetry) {
+            $delay = $attempt === 1 ? 2 * HOUR_IN_SECONDS : 4 * HOUR_IN_SECONDS;
+            $retryPayload = $payload;
+            $retryPayload['attempt'] = $attempt + 1;
+
+            \as_schedule_single_action(
+                time() + $delay,
+                self::HOOK_PROCESS,
+                [$retryPayload],
+                'newss'
+            );
+            // Pending-Transient verlaengern damit Channel-Poll das Video
+            // nicht zwischendurch erneut enqueueed
+            set_transient(self::pendingTransientKey($videoId), 1, 7 * DAY_IN_SECONDS);
+
+            self::log(sprintf(
+                'transcript empty (%d chars, Versuch %d/3, Video %.1fh alt) — Retry in %dh geplant. %s',
+                $chars,
+                $attempt,
+                $ageHours,
+                (int) round($delay / HOUR_IN_SECONDS),
+                $diagnose
+            ));
+            return;
+        }
+
+        $reason = $attempt >= 3 ? 'nach 3 Versuchen' : ($ageHours >= 24 ? 'Video zu alt fuer Retry' : 'kein Retry moeglich');
+        self::skip(sprintf(
+            'transcript empty (%d chars, Versuch %d, %s). %s',
+            $chars,
+            $attempt,
+            $reason,
+            $diagnose
+        ), $videoId);
+    }
+
+    /**
+     * @param array<int,array{provider:string,ok:bool,detail:string}> $log
+     */
+    private static function formatAttemptLog(array $log): string
+    {
+        if ($log === []) {
+            return 'kein Provider gerufen';
+        }
+        $parts = array_map(
+            static fn(array $a): string => $a['provider'] . '=' . ($a['ok'] ? 'OK' : 'FAIL') . '(' . $a['detail'] . ')',
+            $log
+        );
+        return implode(' | ', $parts);
+    }
+
+    private static function parsePublishedTs(string $iso): int
+    {
+        if ($iso === '') return 0;
+        $ts = strtotime($iso);
+        return $ts !== false ? $ts : 0;
     }
 
     /**
