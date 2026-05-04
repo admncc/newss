@@ -15,6 +15,7 @@ final class Settings
     private const SLUG_YOUTUBE     = 'newss-youtube';
     private const SLUG_TRANSCRIPT  = 'newss-transcript';
     private const SLUG_PUBLISHING  = 'newss-publishing';
+    private const SLUG_HELP        = 'newss-help';
 
     public static function register(): void
     {
@@ -294,13 +295,14 @@ final class Settings
             'dashicons-megaphone',
             58
         );
-        add_submenu_page(self::SLUG_STATUS, 'Newss · Status',         'Status',          'manage_options', self::SLUG_STATUS,     [self::class, 'renderStatusPage']);
-        add_submenu_page(self::SLUG_STATUS, 'Newss · Job-Pipeline',   'Job-Pipeline',    'manage_options', self::SLUG_PIPELINE,   [self::class, 'renderPipelinePage']);
-        add_submenu_page(self::SLUG_STATUS, 'Newss · Kanäle',         'Kanäle',          'manage_options', self::SLUG_CHANNELS,   [self::class, 'renderChannelsPage']);
-        add_submenu_page(self::SLUG_STATUS, 'Newss · Claude',         'Claude',          'manage_options', self::SLUG_CLAUDE,     [self::class, 'renderClaudePage']);
-        add_submenu_page(self::SLUG_STATUS, 'Newss · YouTube',        'YouTube',         'manage_options', self::SLUG_YOUTUBE,    [self::class, 'renderYoutubePage']);
-        add_submenu_page(self::SLUG_STATUS, 'Newss · Transkript',     'Transkript',      'manage_options', self::SLUG_TRANSCRIPT, [self::class, 'renderTranscriptPage']);
-        add_submenu_page(self::SLUG_STATUS, 'Newss · Veröffentlichung','Veröffentlichung','manage_options', self::SLUG_PUBLISHING, [self::class, 'renderPublishingPage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Status',          'Status',           'manage_options', self::SLUG_STATUS,     [self::class, 'renderStatusPage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Kanäle',          'Kanäle',           'manage_options', self::SLUG_CHANNELS,   [self::class, 'renderChannelsPage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · YouTube',         'YouTube',          'manage_options', self::SLUG_YOUTUBE,    [self::class, 'renderYoutubePage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Transkript',      'Transkript',       'manage_options', self::SLUG_TRANSCRIPT, [self::class, 'renderTranscriptPage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Claude',          'Claude',           'manage_options', self::SLUG_CLAUDE,     [self::class, 'renderClaudePage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Veröffentlichung','Veröffentlichung', 'manage_options', self::SLUG_PUBLISHING, [self::class, 'renderPublishingPage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Job-Pipeline',    'Job-Pipeline',     'manage_options', self::SLUG_PIPELINE,   [self::class, 'renderPipelinePage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Hilfe',           'Hilfe',            'manage_options', self::SLUG_HELP,       [self::class, 'renderHelpPage']);
     }
 
     public static function registerSettings(): void
@@ -1061,6 +1063,76 @@ final class Settings
                 </table>
                 <?php submit_button(); ?>
             </form>
+        </div>
+        <?php
+    }
+
+    public static function renderHelpPage(): void
+    {
+        if (!current_user_can('manage_options')) return;
+        ?>
+        <div class="wrap">
+            <h1>Newss · Hilfe</h1>
+
+            <h2>Quick-Start</h2>
+            <ol style="max-width:780px;line-height:1.7">
+                <li><strong>YouTube-API-Key</strong> in <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_YOUTUBE)); ?>">YouTube</a> eintragen und mit „Testen“ verifizieren.</li>
+                <li><strong>Anthropic-API-Key</strong> in <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_CLAUDE)); ?>">Claude</a> eintragen und Modell wählen.</li>
+                <li>Optional: <strong>Supadata-Key</strong> in <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_TRANSCRIPT)); ?>">Transkript</a> für schnelles Caption-Fetching, oder <strong>yt-dlp</strong> als Free-Fallback.</li>
+                <li>In <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_CHANNELS)); ?>">Kanäle</a> einen YouTube-Kanal per URL/Handle hinzufügen und „Testen“ klicken — wenn Videos gefunden werden, ist alles korrekt.</li>
+                <li>In <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_PUBLISHING)); ?>">Veröffentlichung</a> Default-Kategorie und Status setzen.</li>
+                <li>Auf <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_STATUS)); ?>">Status</a> sehen wie der erste Poll läuft. Bei Bedarf manuell „Jetzt pollen“ triggern.</li>
+            </ol>
+
+            <h2>Häufige Fehler</h2>
+            <table class="widefat striped" style="max-width:880px">
+                <thead><tr><th style="width:240px">Symptom</th><th>Ursache &amp; Lösung</th></tr></thead>
+                <tbody>
+                    <tr>
+                        <td><strong>YT-Quota erschöpft</strong></td>
+                        <td>YouTube-Daily-Quota (10k Units) verbraucht. Reset um Mitternacht Pacific-Zeit (~09:00 Berlin). Sichtbar im Status-Health-Tile. Polls pausieren automatisch bis Reset.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Supadata HTTP 429</strong></td>
+                        <td>Rate-Limit. Plugin fällt automatisch auf yt-dlp / Whisper zurück. Falls dauerhaft: Plan upgraden oder Supadata deaktivieren.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>yt-dlp findet keine Subs</strong></td>
+                        <td>Channel ohne Auto-Captions oder Geo-/Bot-Block. Mit Residential-Proxy in <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_TRANSCRIPT)); ?>">Transkript</a> abhilfen oder Whisper-Fallback aktivieren.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Claude HTTP 529 / overloaded</strong></td>
+                        <td>Anthropic-Server überlastet. Action-Scheduler retried automatisch. Falls dauerhaft: kleineres Modell wählen.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Claude HTTP 429 / rate-limit</strong></td>
+                        <td>Eigener Workspace-Cap erreicht. In <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_CLAUDE)); ?>">Claude</a> Daily-Cap reduzieren oder Workspace-Limit anheben.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Pipeline hängt auf „pending“</strong></td>
+                        <td>Action-Scheduler-Cron läuft nicht. Prüfen: <code>wp action-scheduler run</code> via WP-CLI oder System-Cron für <code>wp-cron.php</code> einrichten.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Posts erscheinen als Entwurf trotz „Sofort veröffentlichen“</strong></td>
+                        <td>Kill-Switch aktiv (in Veröffentlichung) oder sensibles Topic von KI erkannt → siehe „Aktion bei Treffer“.</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2>Wartung</h2>
+            <ul style="max-width:780px;line-height:1.7">
+                <li><strong>Plugin-Update:</strong> auf <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_STATUS)); ?>">Status</a> ganz unten — „Aus Git aktualisieren“.</li>
+                <li><strong>Stuck-Jobs:</strong> in <a href="<?php echo esc_url(admin_url('admin.php?page=' . self::SLUG_PIPELINE)); ?>">Job-Pipeline</a> Filter „failed“ → manuell retry oder Video überspringen.</li>
+                <li><strong>Deinstallation:</strong> Plugin löschen entfernt alle Optionen, Transients, Locks &amp; Action-Scheduler-Jobs (siehe <code>uninstall.php</code>).</li>
+            </ul>
+
+            <h2>Doku &amp; Links</h2>
+            <ul style="max-width:780px;line-height:1.7">
+                <li>Anthropic API: <a href="https://docs.anthropic.com/en/api/messages" target="_blank" rel="noopener">docs.anthropic.com</a></li>
+                <li>YouTube Data API v3: <a href="https://developers.google.com/youtube/v3/docs/playlistItems/list" target="_blank" rel="noopener">developers.google.com</a></li>
+                <li>Supadata: <a href="https://supadata.ai/docs" target="_blank" rel="noopener">supadata.ai/docs</a></li>
+                <li>Action Scheduler: <a href="https://actionscheduler.org/" target="_blank" rel="noopener">actionscheduler.org</a></li>
+            </ul>
         </div>
         <?php
     }

@@ -14,6 +14,55 @@ final class Channels
         add_action('admin_post_newss_channel_delete', [self::class, 'handleDelete']);
         add_action('admin_post_newss_channel_toggle', [self::class, 'handleToggle']);
         add_action('admin_post_newss_channel_bulk', [self::class, 'handleBulk']);
+        add_action('admin_post_newss_channel_test', [self::class, 'handleTest']);
+    }
+
+    public static function handleTest(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+        $id = sanitize_text_field(wp_unslash((string) ($_GET['id'] ?? '')));
+        check_admin_referer('newss_channel_test_' . $id);
+
+        $channels = self::all();
+        $target = null;
+        foreach ($channels as $ch) {
+            if (($ch['id'] ?? '') === $id) {
+                $target = $ch;
+                break;
+            }
+        }
+        if ($target === null) {
+            self::flash('error', 'Kanal nicht gefunden.');
+            self::redirect();
+            return;
+        }
+
+        $result = RssPoller::testChannel($target);
+        if (!$result['ok']) {
+            self::flash('error', sprintf(
+                'Test für „%s" fehlgeschlagen: %s',
+                (string) $target['name'],
+                $result['error']
+            ));
+            self::redirect();
+            return;
+        }
+
+        $msg = sprintf(
+            'Test „%s" OK: %d Videos gefunden (%d neu, %d bereits verarbeitet).',
+            (string) $target['name'],
+            $result['total'],
+            $result['new'],
+            $result['skipped']
+        );
+        if (!empty($result['samples'])) {
+            $titles = array_map(static fn(array $s): string => (string) $s['title'], $result['samples']);
+            $msg .= ' Neueste: „' . implode('", „', $titles) . '"';
+        }
+        self::flash('success', $msg);
+        self::redirect();
     }
 
     public static function handleBulk(): void
@@ -172,7 +221,7 @@ final class Channels
                             <th>Channel-ID</th>
                             <th>Kategorie</th>
                             <th style="width:80px">Status</th>
-                            <th style="width:200px">Aktion</th>
+                            <th style="width:280px">Aktion</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -189,6 +238,10 @@ final class Channels
                     $toggleUrl = wp_nonce_url(
                         admin_url('admin-post.php?action=newss_channel_toggle&id=' . rawurlencode((string) $ch['id'])),
                         'newss_channel_toggle_' . $ch['id']
+                    );
+                    $testUrl = wp_nonce_url(
+                        admin_url('admin-post.php?action=newss_channel_test&id=' . rawurlencode((string) $ch['id'])),
+                        'newss_channel_test_' . $ch['id']
                     );
                     $isActive = !empty($ch['enabled']);
                     $isCurrentlyEdited = $isEdit && $editing['id'] === $ch['id'];
@@ -207,6 +260,7 @@ final class Channels
                             </a>
                         </td>
                         <td>
+                            <a href="<?php echo esc_url($testUrl); ?>" class="button button-small" title="Letzte Videos abfragen ohne Enqueue">Testen</a>
                             <a href="<?php echo esc_url($editUrl); ?>" class="button button-small">Bearbeiten</a>
                             <a href="<?php echo esc_url($delUrl); ?>" class="button button-small button-link-delete newss-delete-link" data-channel-name="<?php echo esc_attr((string) $ch['name']); ?>">Löschen</a>
                         </td>

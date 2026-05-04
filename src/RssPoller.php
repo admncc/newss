@@ -88,6 +88,56 @@ final class RssPoller
         update_option('newss_poll_progress', $progress, false);
     }
 
+    /**
+     * Synchronous single-channel test: fetches latest video list without enqueueing
+     * any jobs. Returns counts of "would-enqueue" + skipped duplicates.
+     *
+     * @return array{ok:bool, total:int, new:int, skipped:int, error:string, samples:array<int,array{id:string,title:string}>}
+     */
+    public static function testChannel(array $channel): array
+    {
+        $channelId = (string) ($channel['id'] ?? '');
+        if ($channelId === '') {
+            return ['ok' => false, 'total' => 0, 'new' => 0, 'skipped' => 0, 'error' => 'Channel-ID fehlt', 'samples' => []];
+        }
+        $method = (string) get_option('newss_youtube_method', 'rss');
+        try {
+            if ($method === 'api') {
+                $apiKey = trim((string) get_option('newss_youtube_api_key', ''));
+                if ($apiKey === '') {
+                    throw new \RuntimeException('Methode = API gewählt, aber API-Key ist leer');
+                }
+                $videos = self::fetchViaApi($channelId, $apiKey);
+            } else {
+                $videos = self::fetchViaRss($channelId);
+            }
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'total' => 0, 'new' => 0, 'skipped' => 0, 'error' => $e->getMessage(), 'samples' => []];
+        }
+
+        $new = 0;
+        $skipped = 0;
+        $samples = [];
+        foreach ($videos as $v) {
+            if (self::videoAlreadyHandled($v['id'])) {
+                $skipped++;
+            } else {
+                $new++;
+            }
+            if (count($samples) < 3) {
+                $samples[] = ['id' => (string) $v['id'], 'title' => (string) $v['title']];
+            }
+        }
+        return [
+            'ok'      => true,
+            'total'   => count($videos),
+            'new'     => $new,
+            'skipped' => $skipped,
+            'error'   => '',
+            'samples' => $samples,
+        ];
+    }
+
     private static function pollChannel(array $channel): int
     {
         $channelId = (string) $channel['id'];
