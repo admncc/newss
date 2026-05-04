@@ -98,7 +98,12 @@ final class RssPoller
         if (!preg_match('/^UC[A-Za-z0-9_-]{22}$/', $channelId)) {
             throw new \RuntimeException('Invalid channel id format: ' . $channelId);
         }
-        $uploadsPlaylist = 'UU' . substr($channelId, 2);
+
+        $uploadsPlaylist = self::resolveUploadsPlaylist($channelId, $apiKey);
+        if ($uploadsPlaylist === '') {
+            throw new \RuntimeException('YT-API: uploads-Playlist nicht ermittelbar für ' . $channelId);
+        }
+
         $url = add_query_arg([
             'part'       => 'snippet,contentDetails',
             'playlistId' => $uploadsPlaylist,
@@ -115,6 +120,23 @@ final class RssPoller
         }
         $code = (int) wp_remote_retrieve_response_code($response);
         $body = (string) wp_remote_retrieve_body($response);
+        if ($code === 404) {
+            // Cache stale invalidieren und einmal mit frisch-aufgelöster Playlist retry
+            delete_transient('newss_uploads_' . $channelId);
+            $uploadsPlaylist = self::resolveUploadsPlaylist($channelId, $apiKey);
+            if ($uploadsPlaylist === '') {
+                throw new \RuntimeException('YT-API HTTP 404 + uploads-Playlist nicht auffindbar');
+            }
+            $url = add_query_arg([
+                'part'       => 'snippet,contentDetails',
+                'playlistId' => $uploadsPlaylist,
+                'maxResults' => 15,
+                'key'        => $apiKey,
+            ], 'https://www.googleapis.com/youtube/v3/playlistItems');
+            $response = wp_remote_get($url, ['timeout' => 30]);
+            $code = (int) wp_remote_retrieve_response_code($response);
+            $body = (string) wp_remote_retrieve_body($response);
+        }
         if ($code !== 200) {
             $errMsg = '';
             $j = json_decode($body, true);
@@ -137,6 +159,37 @@ final class RssPoller
             }
         }
         return $out;
+    }
+
+    /**
+     * Liefert die Uploads-Playlist-ID. Erst via Cache (7 Tage),
+     * sonst per channels.list, sonst Fallback auf UC->UU-Konvention.
+     */
+    private static function resolveUploadsPlaylist(string $channelId, string $apiKey): string
+    {
+        $cached = get_transient('newss_uploads_' . $channelId);
+        if (is_string($cached) && $cached !== '') {
+            return $cached;
+        }
+
+        $url = add_query_arg([
+            'part' => 'contentDetails',
+            'id'   => $channelId,
+            'key'  => $apiKey,
+        ], 'https://www.googleapis.com/youtube/v3/channels');
+
+        $resp = wp_remote_get($url, ['timeout' => 20]);
+        if (!is_wp_error($resp) && (int) wp_remote_retrieve_response_code($resp) === 200) {
+            $data = json_decode((string) wp_remote_retrieve_body($resp), true);
+            $uploads = (string) ($data['items'][0]['contentDetails']['relatedPlaylists']['uploads'] ?? '');
+            if ($uploads !== '') {
+                set_transient('newss_uploads_' . $channelId, $uploads, 7 * DAY_IN_SECONDS);
+                return $uploads;
+            }
+        }
+
+        // Fallback: UC->UU-Konvention
+        return 'UU' . substr($channelId, 2);
     }
 
     /**
