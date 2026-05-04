@@ -216,10 +216,14 @@ final class Transcript
         }
         $url = 'https://www.youtube.com/watch?v=' . $videoId;
 
+        // Whisper akzeptiert max 25 MB. mp3 mono 16kHz 32kbps -> ca. 60 Min.
+        // bevor wir das Limit reissen. ffmpeg-postprocessor-args konvertiert
+        // direkt nach dem yt-dlp-Audio-Extract.
         $cmd = sprintf(
-            '%s%s -x --audio-format mp3 --audio-quality 9 -o %s %s 2>&1',
+            '%s%s -x --audio-format mp3 --postprocessor-args %s -o %s %s 2>&1',
             escapeshellarg($bin),
             self::proxyArg(),
+            escapeshellarg('ffmpeg:-ar 16000 -ac 1 -b:a 32k'),
             escapeshellarg($tmpDir . '/audio.%(ext)s'),
             escapeshellarg($url)
         );
@@ -236,6 +240,20 @@ final class Transcript
             return '';
         }
         $mp3 = $files[0];
+
+        // Pre-Size-Check: Whisper-API-Limit ist 25 MB (26214400 Bytes).
+        // Wir nehmen 24 MB als Sicherheits-Threshold.
+        $size = (int) @filesize($mp3);
+        $maxBytes = 24 * 1024 * 1024;
+        if ($size > $maxBytes) {
+            $this->cleanup($tmpDir);
+            $this->recordAttempt('whisper', false, sprintf(
+                'Audio %.1f MB > 24 MB (Whisper-Limit) — Video zu lang',
+                $size / 1024 / 1024
+            ));
+            self::recordHealth('whisper', false, 'audio too large (' . round($size / 1024 / 1024, 1) . ' MB)');
+            return '';
+        }
 
         $boundary = wp_generate_password(24, false);
         $body = $this->multipartBody($boundary, $mp3, [
