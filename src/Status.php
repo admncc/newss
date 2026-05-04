@@ -25,7 +25,7 @@ final class Status
                 <div id="newss-progress-bar" style="background:#2271b1;height:100%;width:0%;transition:width 0.3s ease"></div>
             </div>
             <p id="newss-progress-hint" style="margin:8px 0 0 0;font-size:11px;color:#999">
-                Live-Status pollt alle 30 Sekunden, sobald ein Lauf gestartet wird.
+                Live-Status pollt alle 3 Sekunden, sobald ein Lauf gestartet wird.
             </p>
             <ul id="newss-progress-channels" style="margin:10px 0 0 0;padding:0;list-style:none;font-size:12px;max-height:180px;overflow:auto"></ul>
         </div>
@@ -118,7 +118,7 @@ final class Status
                 heading.textContent = '○ Bereit — kein aktiver Poll';
                 txt.textContent = 'Klick „Jetzt manuell pollen" oben — Status erscheint hier live.';
                 barWrap.style.display = 'none';
-                hint.innerHTML = 'Live-Status pollt alle 30 Sekunden, sobald ein Lauf gestartet wird.';
+                hint.innerHTML = 'Live-Status pollt alle 3 Sekunden, sobald ein Lauf gestartet wird.';
                 if (list) list.innerHTML = '';
             }
 
@@ -143,7 +143,7 @@ final class Status
                 bar.style.width = pct + '%';
                 txt.textContent = 'Kanal ' + p.done + ' / ' + p.total +
                     (p.current ? ' — gerade: ' + p.current : '');
-                hint.innerHTML = 'Aktualisiert sich alle 30 Sekunden — kein Page-Reload nötig.';
+                hint.innerHTML = 'Aktualisiert sich alle 3 Sekunden — kein Page-Reload nötig.';
                 renderChannelList(p.channels || []);
             }
 
@@ -190,7 +190,7 @@ final class Status
             }
 
             tick();
-            timer = setInterval(tick, 30000);
+            timer = setInterval(tick, 3000);
             // Sicherheits-Stop nach 30 Min auch im running-Fall
             setTimeout(stop, 30 * 60 * 1000);
         })();
