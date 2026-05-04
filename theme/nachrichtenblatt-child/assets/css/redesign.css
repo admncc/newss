@@ -1,0 +1,692 @@
+/* =========================================================================
+   Nachrichtenblatt — Redesign Stylesheet
+   Lädt nach dem Newspaper-Parent-CSS. Override-Strategie:
+   1) CSS-Variablen ändern global Farben/Maße
+   2) Selektoren werden so spezifisch wie nötig — Newspaper nutzt viele
+      .td-pb-row / .tdb-* Klassen, wir hängen unsere Regeln daneben.
+   3) !important nur für inline-style-Konflikte (tagDiv Cloud Library
+      schreibt Inline-Styles) — sparsam verwendet.
+   ========================================================================= */
+
+/* -------------------------------------------------------------------------
+   1. Design-Tokens (Farbe, Typo, Maße)
+   ------------------------------------------------------------------------- */
+:root {
+    --nbc-brand: #d81e1e;            /* Mark-Rot, etwas tiefer als das alte #ec3535 */
+    --nbc-brand-600: #b51616;        /* Hover/Active */
+    --nbc-brand-soft: #fff5f5;       /* sehr helle Brand-Tönung */
+    --nbc-accent: #1e3a8a;           /* Navy für Links/Meta-Buttons */
+    --nbc-accent-soft: #eef2ff;
+
+    --nbc-ink: #0e1116;              /* Haupttext, fast schwarz */
+    --nbc-ink-2: #2a2f3a;            /* sekundär */
+    --nbc-ink-muted: #5a6072;        /* Meta, Captions */
+    --nbc-line: #e5e7eb;             /* Borders, Trennlinien */
+    --nbc-line-strong: #cbd0d8;
+    --nbc-paper: #ffffff;            /* Hintergrund */
+    --nbc-paper-2: #fafafa;          /* alternative Sections */
+    --nbc-paper-3: #f4f5f7;
+
+    --nbc-success: #15803d;
+    --nbc-warning: #b45309;
+    --nbc-danger:  #b91c1c;
+
+    /* Typografie */
+    --nbc-serif: "PT Serif", "Source Serif 4", Georgia, "Times New Roman", serif;
+    --nbc-sans:  "Inter", "Open Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --nbc-meta:  "Work Sans", "Inter", system-ui, sans-serif;
+
+    /* Modulare Skala (ratio 1.25 — Major Third) */
+    --nbc-fs-xs:   0.8125rem;   /* 13px */
+    --nbc-fs-sm:   0.9375rem;   /* 15px */
+    --nbc-fs-base: 1.0625rem;   /* 17px */
+    --nbc-fs-md:   1.25rem;     /* 20px */
+    --nbc-fs-lg:   1.5625rem;   /* 25px */
+    --nbc-fs-xl:   1.953rem;    /* ~31px */
+    --nbc-fs-2xl:  2.441rem;    /* ~39px */
+    --nbc-fs-3xl:  3.052rem;    /* ~49px */
+
+    /* Spacing */
+    --nbc-sp-1: .25rem;
+    --nbc-sp-2: .5rem;
+    --nbc-sp-3: .75rem;
+    --nbc-sp-4: 1rem;
+    --nbc-sp-5: 1.5rem;
+    --nbc-sp-6: 2rem;
+    --nbc-sp-8: 3rem;
+    --nbc-sp-10: 4.5rem;
+
+    --nbc-radius: 6px;
+    --nbc-radius-lg: 12px;
+    --nbc-shadow-sm: 0 1px 2px rgba(14, 17, 22, .06);
+    --nbc-shadow-md: 0 4px 14px rgba(14, 17, 22, .08);
+    --nbc-shadow-lg: 0 12px 32px rgba(14, 17, 22, .12);
+
+    --nbc-content-width: 720px;
+    --nbc-wide-width: 1180px;
+
+    --nbc-transition: 180ms cubic-bezier(.2, .8, .2, 1);
+}
+
+/* Dark-Mode-Tokens — opt-in via data-attribute oder via prefers-color-scheme.
+   data-nbc-color-mode auf <html> wird vom Customizer / vom JS-Toggle gesetzt. */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-nbc-color-mode="light"]) {
+        --nbc-ink: #e7e9ee;
+        --nbc-ink-2: #c8ccd5;
+        --nbc-ink-muted: #9aa0ad;
+        --nbc-line: #232832;
+        --nbc-line-strong: #343a48;
+        --nbc-paper: #0e1116;
+        --nbc-paper-2: #161a22;
+        --nbc-paper-3: #1c2230;
+        --nbc-brand: #ff5252;
+        --nbc-brand-soft: #2a1414;
+        --nbc-accent: #93c5fd;
+        --nbc-accent-soft: #142036;
+        --nbc-shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+        --nbc-shadow-md: 0 4px 14px rgba(0, 0, 0, .5);
+        --nbc-shadow-lg: 0 12px 32px rgba(0, 0, 0, .6);
+    }
+}
+:root[data-nbc-color-mode="dark"] {
+    --nbc-ink: #e7e9ee;
+    --nbc-ink-2: #c8ccd5;
+    --nbc-ink-muted: #9aa0ad;
+    --nbc-line: #232832;
+    --nbc-line-strong: #343a48;
+    --nbc-paper: #0e1116;
+    --nbc-paper-2: #161a22;
+    --nbc-paper-3: #1c2230;
+    --nbc-brand: #ff5252;
+    --nbc-brand-soft: #2a1414;
+    --nbc-accent: #93c5fd;
+    --nbc-accent-soft: #142036;
+    --nbc-shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+    --nbc-shadow-md: 0 4px 14px rgba(0, 0, 0, .5);
+    --nbc-shadow-lg: 0 12px 32px rgba(0, 0, 0, .6);
+}
+
+/* -------------------------------------------------------------------------
+   2. Globale Reset-Ergänzungen
+   ------------------------------------------------------------------------- */
+html {
+    scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        transition-duration: .01ms !important;
+    }
+}
+
+body,
+body.td-magazine,
+body.td-theme-wrap {
+    background: var(--nbc-paper);
+    color: var(--nbc-ink);
+    font-family: var(--nbc-sans);
+    font-size: var(--nbc-fs-base);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Selektion in Brand-Farbe */
+::selection {
+    background: var(--nbc-brand);
+    color: #fff;
+}
+
+/* -------------------------------------------------------------------------
+   3. Typografie
+   ------------------------------------------------------------------------- */
+h1, h2, h3, h4, h5, h6,
+.entry-title, .tdb-title-text, .tdb-block-title,
+.td_module_wrap .entry-title {
+    font-family: var(--nbc-serif);
+    color: var(--nbc-ink);
+    font-weight: 700;
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+    margin-top: 0;
+}
+
+h1, .entry-title { font-size: var(--nbc-fs-3xl); }
+h2 { font-size: var(--nbc-fs-2xl); }
+h3 { font-size: var(--nbc-fs-xl); }
+h4 { font-size: var(--nbc-fs-lg); }
+h5 { font-size: var(--nbc-fs-md); }
+h6 { font-size: var(--nbc-fs-base); text-transform: uppercase; letter-spacing: .08em; }
+
+a {
+    color: var(--nbc-accent);
+    text-decoration-color: color-mix(in srgb, var(--nbc-accent) 40%, transparent);
+    text-decoration-thickness: .08em;
+    text-underline-offset: .18em;
+    transition: color var(--nbc-transition), text-decoration-color var(--nbc-transition);
+}
+a:hover, a:focus-visible {
+    color: var(--nbc-brand);
+    text-decoration-color: var(--nbc-brand);
+}
+
+/* Sichtbare, brand-konsistente Fokus-Ringe */
+:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--nbc-brand) 60%, transparent);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+/* Skip-Link */
+.nbc-skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 100000;
+    background: var(--nbc-ink);
+    color: #fff;
+    padding: .75rem 1rem;
+    font-weight: 600;
+    border-radius: 0 0 var(--nbc-radius) 0;
+}
+.nbc-skip-link:focus,
+.nbc-skip-link:focus-visible {
+    left: 1rem;
+    top: 1rem;
+    outline: 3px solid var(--nbc-brand);
+}
+
+/* -------------------------------------------------------------------------
+   4. Header & Logo (tagDiv Cloud Library .tdb_header_*)
+   ------------------------------------------------------------------------- */
+.tdb_header_logo .tdb-logo-text-title {
+    font-family: var(--nbc-serif) !important;
+    color: var(--nbc-brand) !important;
+    letter-spacing: -0.04em !important;
+    /* Beibehalten der bestehenden Größe — Inline-Styles dominieren —
+       wir tweaken nur die Farbe & das Letter-Spacing. */
+}
+.tdb_header_logo .tdb-logo-text-tagline {
+    font-family: var(--nbc-meta) !important;
+    color: var(--nbc-ink-muted) !important;
+    text-transform: uppercase !important;
+    letter-spacing: .12em !important;
+    font-style: normal !important;
+    font-weight: 600 !important;
+}
+
+/* Sticky-Header — Newspaper hat einen, wir verfeinern Schatten/BG */
+.tds-header-style-1 .td-header-sp-logo,
+.tdb-header-wrap.tdb-header-stick--smart {
+    backdrop-filter: saturate(140%) blur(8px);
+    -webkit-backdrop-filter: saturate(140%) blur(8px);
+    background: color-mix(in srgb, var(--nbc-paper) 92%, transparent);
+    border-bottom: 1px solid var(--nbc-line);
+    box-shadow: var(--nbc-shadow-sm);
+}
+
+/* Hauptmenü */
+.tdb-block-menu .tdb-menu li > a,
+.td-header-menu-wrap .sf-menu > li > a {
+    font-family: var(--nbc-meta);
+    font-weight: 600;
+    font-size: var(--nbc-fs-sm);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--nbc-ink) !important;
+    padding: .9rem 1rem !important;
+    transition: color var(--nbc-transition), background var(--nbc-transition);
+}
+.tdb-block-menu .tdb-menu li > a:hover,
+.tdb-block-menu .tdb-menu li.current-menu-item > a,
+.td-header-menu-wrap .sf-menu > li > a:hover,
+.td-header-menu-wrap .sf-menu > li.current-menu-item > a {
+    color: var(--nbc-brand) !important;
+    background: var(--nbc-brand-soft) !important;
+}
+
+/* Mobile-Toggle Button (Hamburger) — robuster Fokus-Ring */
+.tdb-mobile-menu-button:focus-visible,
+.td-icon-menu:focus-visible {
+    outline: 3px solid var(--nbc-brand);
+    outline-offset: 2px;
+}
+
+/* -------------------------------------------------------------------------
+   5. Artikel-Karten (td_module_*, tdb-block-inner) — Listen-Übersicht
+   ------------------------------------------------------------------------- */
+.td_module_wrap,
+.tdb_module_loop {
+    background: var(--nbc-paper);
+    border-radius: var(--nbc-radius-lg);
+    transition: transform var(--nbc-transition), box-shadow var(--nbc-transition);
+}
+
+/* Card-Variante: nur dort, wo Newspaper Karten rendert (mit Bild + Titel) */
+.td_module_wrap .td-module-thumb,
+.tdb_module_loop .td-image-wrap {
+    overflow: hidden;
+    border-radius: var(--nbc-radius);
+    background: var(--nbc-paper-3);
+}
+
+.td_module_wrap .td-module-thumb img,
+.tdb_module_loop .td-image-wrap img {
+    transition: transform 400ms cubic-bezier(.2, .8, .2, 1);
+}
+.td_module_wrap:hover .td-module-thumb img,
+.tdb_module_loop:hover .td-image-wrap img {
+    transform: scale(1.04);
+}
+
+/* Kategorien-Tag (Kicker) */
+.td-post-category,
+.tdb-category a {
+    display: inline-block;
+    background: var(--nbc-brand) !important;
+    color: #fff !important;
+    font-family: var(--nbc-meta) !important;
+    font-weight: 700 !important;
+    font-size: 0.75rem !important;
+    letter-spacing: .08em !important;
+    text-transform: uppercase !important;
+    padding: .25rem .5rem !important;
+    border-radius: 3px !important;
+    line-height: 1.2 !important;
+}
+.td-post-category:hover,
+.tdb-category a:hover {
+    background: var(--nbc-brand-600) !important;
+}
+
+/* Titel in Karten */
+.td_module_wrap .entry-title a,
+.tdb_module_loop .entry-title a {
+    color: var(--nbc-ink) !important;
+    font-family: var(--nbc-serif) !important;
+    font-weight: 700;
+    line-height: 1.22 !important;
+    letter-spacing: -0.005em;
+    transition: color var(--nbc-transition);
+}
+.td_module_wrap:hover .entry-title a,
+.tdb_module_loop:hover .entry-title a {
+    color: var(--nbc-brand) !important;
+}
+
+/* Excerpt */
+.td-excerpt,
+.tdb-excerpt-text {
+    color: var(--nbc-ink-muted) !important;
+    font-family: var(--nbc-sans) !important;
+    line-height: 1.55 !important;
+    font-size: var(--nbc-fs-sm) !important;
+}
+
+/* Meta-Zeile (Autor, Datum) */
+.td-module-meta-info,
+.tdb-meta-info,
+.td-post-author-name,
+.td-post-date {
+    font-family: var(--nbc-meta) !important;
+    font-size: var(--nbc-fs-xs) !important;
+    color: var(--nbc-ink-muted) !important;
+    letter-spacing: .02em;
+}
+.td-post-author-name a {
+    color: var(--nbc-ink-2) !important;
+    font-weight: 600;
+}
+
+/* -------------------------------------------------------------------------
+   6. Single-Post-Layout
+   ------------------------------------------------------------------------- */
+.single-post .td-post-header,
+.single-post .tdb_single_title,
+.single-post .tdb_single_post_share,
+.single-post .tdb_single_categories {
+    max-width: var(--nbc-wide-width);
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.single-post .td-post-content,
+.single-post .tdb_single_content {
+    max-width: var(--nbc-content-width);
+    margin: 0 auto;
+    font-size: 1.125rem;
+    line-height: 1.75;
+    color: var(--nbc-ink-2);
+}
+
+.single-post .td-post-content > p:first-of-type::first-letter,
+.single-post .tdb_single_content > p:first-of-type::first-letter {
+    font-family: var(--nbc-serif);
+    font-size: 4.2em;
+    font-weight: 700;
+    color: var(--nbc-brand);
+    float: left;
+    line-height: .85;
+    margin: .12em .12em 0 0;
+}
+/* Drop-Cap nur, wenn nicht in Listen / Tabellen */
+.single-post .td-post-content blockquote::first-letter,
+.single-post .tdb_single_content blockquote::first-letter {
+    font-size: inherit;
+    color: inherit;
+    float: none;
+    margin: 0;
+}
+
+.single-post h2 { margin-top: 2.5rem; }
+.single-post h3 { margin-top: 2rem; }
+
+.single-post blockquote,
+.single-post .tdb_single_content blockquote {
+    border-left: 4px solid var(--nbc-brand);
+    background: var(--nbc-paper-2);
+    padding: 1.25rem 1.5rem;
+    margin: 2rem 0;
+    font-family: var(--nbc-serif);
+    font-style: italic;
+    font-size: 1.25rem;
+    line-height: 1.5;
+    color: var(--nbc-ink);
+    border-radius: 0 var(--nbc-radius) var(--nbc-radius) 0;
+}
+
+.single-post figure,
+.single-post .wp-caption {
+    margin: 2rem 0;
+}
+.single-post figcaption,
+.single-post .wp-caption-text {
+    font-family: var(--nbc-meta);
+    font-size: var(--nbc-fs-xs);
+    color: var(--nbc-ink-muted);
+    text-align: left;
+    border-left: 2px solid var(--nbc-line-strong);
+    padding-left: .75rem;
+    margin-top: .5rem;
+}
+
+/* Lesezeit-Pille */
+.nbc-reading-time {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    font-family: var(--nbc-meta);
+    font-size: var(--nbc-fs-xs);
+    font-weight: 600;
+    color: var(--nbc-ink-muted);
+    background: var(--nbc-paper-3);
+    padding: .15rem .55rem;
+    border-radius: 999px;
+    letter-spacing: .02em;
+}
+.nbc-reading-time::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235a6072' stroke-width='2' stroke-linecap='round'><circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/></svg>");
+    background-size: contain;
+    background-repeat: no-repeat;
+}
+
+/* Lesefortschritt — vom JS gefüllt */
+.nbc-progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    width: 0%;
+    background: linear-gradient(90deg, var(--nbc-brand), var(--nbc-brand-600));
+    z-index: 99999;
+    transition: width 80ms linear;
+    pointer-events: none;
+}
+
+/* KI-Disclosure */
+.nbc-ai-disclosure {
+    display: flex;
+    gap: .8rem;
+    align-items: flex-start;
+    margin: 3rem 0 1rem;
+    padding: 1rem 1.25rem;
+    background: var(--nbc-accent-soft);
+    border-left: 4px solid var(--nbc-accent);
+    border-radius: 0 var(--nbc-radius) var(--nbc-radius) 0;
+    font-family: var(--nbc-meta);
+    font-size: var(--nbc-fs-sm);
+    line-height: 1.55;
+    color: var(--nbc-ink-2);
+}
+.nbc-ai-disclosure__icon {
+    flex-shrink: 0;
+    color: var(--nbc-accent);
+    margin-top: 2px;
+}
+.nbc-ai-disclosure strong {
+    color: var(--nbc-ink);
+}
+
+/* Author-Box */
+.td-author-name,
+.tdb-author-name,
+.td-author-by {
+    font-family: var(--nbc-meta) !important;
+    font-weight: 600;
+}
+.td-author-description,
+.tdb-author-description {
+    font-family: var(--nbc-sans) !important;
+    color: var(--nbc-ink-muted);
+    line-height: 1.55;
+}
+
+/* -------------------------------------------------------------------------
+   7. Sidebar-Widgets
+   ------------------------------------------------------------------------- */
+.td-pb-span4 .td_block_template_1 .td-block-title,
+.tdb-block-title {
+    font-family: var(--nbc-meta) !important;
+    font-size: var(--nbc-fs-sm) !important;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: var(--nbc-ink) !important;
+    border-bottom: 2px solid var(--nbc-ink) !important;
+    padding-bottom: .5rem !important;
+    margin-bottom: 1rem !important;
+}
+.td-pb-span4 .td_block_template_1 .td-block-title > *,
+.tdb-block-title > * {
+    background: transparent !important;
+    border: 0 !important;
+    color: inherit !important;
+    padding: 0 !important;
+}
+
+/* "Beliebt"-Liste — größere Lücken zwischen Items */
+.td_module_mx5 + .td_module_mx5,
+.td_module_mx6 + .td_module_mx6 {
+    border-top: 1px solid var(--nbc-line);
+    margin-top: 1rem;
+    padding-top: 1rem;
+}
+
+/* -------------------------------------------------------------------------
+   8. Footer
+   ------------------------------------------------------------------------- */
+.td-footer-wrapper,
+.tdb_header_footer .tdb_header_inner,
+.td-footer-template-wrap {
+    background: var(--nbc-ink) !important;
+    color: #c8ccd5 !important;
+    border-top: 4px solid var(--nbc-brand);
+}
+.td-footer-wrapper a,
+.td-footer-wrapper .td-footer-info a {
+    color: #e7e9ee !important;
+}
+.td-footer-wrapper a:hover {
+    color: var(--nbc-brand) !important;
+}
+.td-footer-wrapper .td-block-title,
+.td-footer-wrapper .td-pb-span4 .td-block-title {
+    color: #fff !important;
+    border-bottom-color: rgba(255, 255, 255, .15) !important;
+}
+.td-sub-footer-container {
+    background: #06080b !important;
+    color: #9aa0ad !important;
+    font-family: var(--nbc-meta);
+    font-size: var(--nbc-fs-xs);
+}
+
+/* -------------------------------------------------------------------------
+   9. Buttons & Forms
+   ------------------------------------------------------------------------- */
+button,
+.btn,
+input[type="submit"],
+.wp-block-button__link {
+    font-family: var(--nbc-meta);
+    font-weight: 600;
+    letter-spacing: .03em;
+    border-radius: var(--nbc-radius);
+    padding: .65rem 1.1rem;
+    background: var(--nbc-ink);
+    color: #fff;
+    border: 0;
+    cursor: pointer;
+    transition: background var(--nbc-transition), transform var(--nbc-transition);
+}
+button:hover,
+.btn:hover,
+input[type="submit"]:hover,
+.wp-block-button__link:hover {
+    background: var(--nbc-brand);
+    transform: translateY(-1px);
+}
+
+input[type="text"],
+input[type="email"],
+input[type="search"],
+input[type="url"],
+textarea,
+select {
+    font-family: var(--nbc-sans);
+    font-size: var(--nbc-fs-base);
+    background: var(--nbc-paper);
+    color: var(--nbc-ink);
+    border: 1px solid var(--nbc-line);
+    border-radius: var(--nbc-radius);
+    padding: .6rem .8rem;
+    transition: border-color var(--nbc-transition), box-shadow var(--nbc-transition);
+}
+input:focus,
+textarea:focus,
+select:focus {
+    border-color: var(--nbc-brand);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--nbc-brand) 18%, transparent);
+    outline: none;
+}
+
+/* -------------------------------------------------------------------------
+   10. Dark-Mode-Toggle (vom JS injiziert)
+   ------------------------------------------------------------------------- */
+.nbc-mode-toggle {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 9999;
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    border: 1px solid var(--nbc-line);
+    background: var(--nbc-paper);
+    color: var(--nbc-ink);
+    box-shadow: var(--nbc-shadow-md);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform var(--nbc-transition), background var(--nbc-transition);
+}
+.nbc-mode-toggle:hover {
+    transform: translateY(-2px);
+    background: var(--nbc-paper-2);
+}
+.nbc-mode-toggle svg { width: 20px; height: 20px; }
+
+/* -------------------------------------------------------------------------
+   11. Newss-Plugin-Integration
+   Hebt KI-generierte Posts dezent hervor — kleines Badge in Listen.
+   ------------------------------------------------------------------------- */
+.nbc-is-ai-post .entry-title::before {
+    content: "KI";
+    display: inline-block;
+    font-family: var(--nbc-meta);
+    font-size: 0.65em;
+    font-weight: 700;
+    background: var(--nbc-accent-soft);
+    color: var(--nbc-accent);
+    padding: .15em .4em;
+    border-radius: 3px;
+    margin-right: .5em;
+    vertical-align: middle;
+    letter-spacing: .08em;
+}
+
+/* -------------------------------------------------------------------------
+   12. Responsive Tweaks
+   ------------------------------------------------------------------------- */
+@media (max-width: 1140px) {
+    .single-post .td-post-content,
+    .single-post .tdb_single_content {
+        max-width: 100%;
+        padding: 0 1rem;
+    }
+}
+
+@media (max-width: 767px) {
+    :root {
+        --nbc-fs-base: 1rem;
+        --nbc-fs-3xl: 2.25rem;
+        --nbc-fs-2xl: 1.85rem;
+        --nbc-fs-xl: 1.5rem;
+    }
+    .single-post .td-post-content > p:first-of-type::first-letter,
+    .single-post .tdb_single_content > p:first-of-type::first-letter {
+        font-size: 3.4em;
+    }
+    .nbc-mode-toggle {
+        right: .5rem;
+        bottom: .5rem;
+        width: 40px;
+        height: 40px;
+    }
+    /* Touch-Targets — Menüs */
+    .tdb-block-menu .tdb-menu li > a,
+    .td-header-menu-wrap .sf-menu > li > a {
+        padding: 1rem 1rem !important;
+    }
+}
+
+/* -------------------------------------------------------------------------
+   13. Print-Stylesheet
+   ------------------------------------------------------------------------- */
+@media print {
+    .td-header-wrap, .td-footer-wrapper,
+    .nbc-progress, .nbc-mode-toggle,
+    .td-post-sharing, .tdb_single_post_share,
+    .nbc-ai-disclosure { display: none !important; }
+    body { background: #fff !important; color: #000 !important; font-size: 12pt; }
+    .single-post .td-post-content,
+    .single-post .tdb_single_content { max-width: 100%; }
+    a { color: #000 !important; text-decoration: underline; }
+    a[href]::after { content: " (" attr(href) ")"; font-size: 9pt; }
+}

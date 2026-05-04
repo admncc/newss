@@ -1,0 +1,20 @@
+/*
+Theme Name:     Nachrichtenblatt Child
+Theme URI:      https://das-nachrichtenblatt.de/
+Description:    Redesign-Child-Theme für das Nachrichtenblatt — basiert auf Newspaper (tagDiv). Liefert ein modernisiertes Design-System (Farben, Typografie, Karten, Single-Layout), Accessibility-Verbesserungen, Dark-Mode, Lesefortschritt und saubere Integration mit dem Newss-Plugin (KI-Disclosure, Autoren-Hinweis).
+Author:         Nachrichtenblatt Redaktion
+Author URI:     https://das-nachrichtenblatt.de/
+Template:       Newspaper
+Version:        1.0.0
+Requires PHP:   8.1
+Requires at least: 6.4
+License:        proprietary
+Text Domain:    nachrichtenblatt-child
+Tags:           news, magazine, child-theme, accessibility-ready, dark-mode, rtl-language-support
+*/
+
+/*
+ * Diese Datei dient nur als Theme-Header.
+ * Die eigentlichen Design-Anpassungen liegen in /assets/css/redesign.css
+ * und werden über functions.php nach dem Parent-CSS eingebunden.
+ */
