@@ -79,6 +79,7 @@ final class Worker
             self::log('posted post #' . $postId);
         } finally {
             delete_option($lockKey);
+            delete_transient(Status::STATUS_COUNTS_CACHE_KEY);
         }
     }
 

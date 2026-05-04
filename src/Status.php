@@ -203,13 +203,20 @@ final class Status
         return $out;
     }
 
+    public const STATUS_COUNTS_CACHE_KEY = 'newss_status_counts';
+
     private static function statusCounts(): array
     {
+        $cached = get_transient(self::STATUS_COUNTS_CACHE_KEY);
+        if (is_array($cached)) {
+            return $cached;
+        }
         $statuses = ['pending', 'in-progress', 'complete', 'failed'];
         $out = [];
         foreach ($statuses as $s) {
             $out[$s] = self::countActions($s);
         }
+        set_transient(self::STATUS_COUNTS_CACHE_KEY, $out, 60);
         return $out;
     }
 
@@ -268,9 +275,9 @@ final class Status
     private static function buildRows(array $ids): array
     {
         $store  = \ActionScheduler::store();
-        $logger = \ActionScheduler::logger();
 
         $createdMap = self::lookupCreatedDates($ids);
+        $logsMap    = self::lookupLogsByActionIds($ids);
 
         $rawRows = [];
         $videoIdsToLookup = [];
@@ -289,7 +296,7 @@ final class Status
             $payload  = $args[0] ?? [];
             $schedule = $action->get_schedule();
             $next     = $schedule && method_exists($schedule, 'get_date') ? $schedule->get_date() : null;
-            $logs     = $logger->get_logs($actionId);
+            $logs     = $logsMap[(int) $actionId] ?? [];
 
             $videoId = (string) ($payload['video_id'] ?? '');
             if ($status === 'complete' && $videoId !== '') {
@@ -318,15 +325,8 @@ final class Status
             $lastLog  = $logs ? end($logs) : null;
 
             $updated = '';
-            if ($lastLog) {
-                try {
-                    $d = $lastLog->get_date();
-                    if ($d) {
-                        $updated = wp_date('Y-m-d H:i', $d->getTimestamp());
-                    }
-                } catch (\Throwable) {
-                    // ignore
-                }
+            if ($lastLog && !empty($lastLog['date'])) {
+                $updated = wp_date('Y-m-d H:i', $lastLog['date']->getTimestamp());
             }
 
             $created = '';
@@ -351,7 +351,7 @@ final class Status
             $reason = '';
             $provider = '';
             foreach ($logs ?: [] as $log) {
-                $msg = $log->get_message();
+                $msg = (string) ($log['message'] ?? '');
                 if (preg_match('/\[newss\]\s+transcript via (\S+)/', $msg, $m)) {
                     $provider = $m[1];
                 }
@@ -361,7 +361,7 @@ final class Status
                     $effective = 'posted';
                 } else {
                     foreach (array_reverse($logs ?: []) as $log) {
-                        $msg = $log->get_message();
+                        $msg = (string) ($log['message'] ?? '');
                         if (preg_match('/\[newss\]\s+SKIP:\s*(.+)/', $msg, $m)) {
                             $effective = 'skipped';
                             $reason = trim($m[1]);
@@ -385,12 +385,51 @@ final class Status
                 'channel_id' => (string) ($payload['channel_id'] ?? ''),
                 'created'    => $created,
                 'updated'    => $updated,
-                'last_log'   => $lastLog ? self::shorten($lastLog->get_message(), 200) : '',
+                'last_log'   => $lastLog ? self::shorten((string) ($lastLog['message'] ?? ''), 200) : '',
                 'post_url'   => $postUrl,
                 'edit_url'   => $editUrl,
             ];
         }
         return $out;
+    }
+
+    /**
+     * Batch-Logs-Lookup: 1 Query statt N (eine pro Action).
+     *
+     * @param int[] $actionIds
+     * @return array<int,array<int,array{message:string,date:?\DateTime}>>
+     */
+    private static function lookupLogsByActionIds(array $actionIds): array
+    {
+        if ($actionIds === []) {
+            return [];
+        }
+        global $wpdb;
+        $ids = array_map('intval', $actionIds);
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $sql = $wpdb->prepare(
+            "SELECT action_id, log_date_gmt, message FROM {$wpdb->prefix}actionscheduler_logs WHERE action_id IN ($placeholders) ORDER BY action_id ASC, log_id ASC",
+            $ids
+        );
+        $rows = $wpdb->get_results($sql, ARRAY_A) ?: [];
+        $map = [];
+        foreach ($rows as $row) {
+            $aid = (int) $row['action_id'];
+            $dt = null;
+            try {
+                if (!empty($row['log_date_gmt'])) {
+                    $dt = new \DateTime($row['log_date_gmt'], new \DateTimeZone('UTC'));
+                }
+            } catch (\Throwable) {
+                // ignore
+            }
+            $map[$aid] ??= [];
+            $map[$aid][] = [
+                'message' => (string) $row['message'],
+                'date'    => $dt,
+            ];
+        }
+        return $map;
     }
 
     /**
