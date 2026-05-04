@@ -143,6 +143,18 @@ final class Transcript
             return '';
         }
 
+        $cap = (int) get_option('newss_whisper_daily_cap', 0);
+        if ($cap > 0) {
+            $today = wp_date('Y-m-d');
+            $opt   = get_option('newss_whisper_calls_today', null);
+            $count = (is_array($opt) && ($opt['date'] ?? '') === $today) ? (int) ($opt['count'] ?? 0) : 0;
+            if ($count >= $cap) {
+                error_log('[newss] whisper daily cap reached; skipping');
+                self::recordHealth('whisper', false, 'daily cap reached (' . $count . '/' . $cap . ')');
+                return '';
+            }
+        }
+
         $bin = (string) get_option('newss_ytdlp_path', 'yt-dlp');
         $tmpDir = $this->makeTmpDir();
         if ($tmpDir === '') {
@@ -202,6 +214,13 @@ final class Transcript
             return '';
         }
         self::recordHealth('whisper', true, '');
+        // Counter erst nach Erfolg inkrementieren (verhindert Cap-Verbrennen bei Fail)
+        if ((int) get_option('newss_whisper_daily_cap', 0) > 0) {
+            $today = wp_date('Y-m-d');
+            $opt   = get_option('newss_whisper_calls_today', null);
+            $count = (is_array($opt) && ($opt['date'] ?? '') === $today) ? (int) ($opt['count'] ?? 0) : 0;
+            update_option('newss_whisper_calls_today', ['date' => $today, 'count' => $count + 1], false);
+        }
         return trim((string) wp_remote_retrieve_body($resp));
     }
 

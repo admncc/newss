@@ -96,6 +96,7 @@ final class Settings
             'newss_youtube_cookie'         => 'sanitize_text_field',
             'newss_ytdlp_path'             => 'sanitize_text_field',
             'newss_whisper_enabled'        => 'absint',
+            'newss_whisper_daily_cap'      => 'absint',
             'newss_default_category'       => 'absint',
             'newss_category_list'          => [self::class, 'sanitizeMultiline'],
             'newss_blocked_topics'         => [self::class, 'sanitizeBlockedTopics'],
@@ -262,7 +263,7 @@ final class Settings
             <h1>Newss · Status</h1>
 
             <?php if (isset($_GET['ran'])):
-                $flag = sanitize_key((string) $_GET['ran']); ?>
+                $flag = sanitize_key(wp_unslash((string) $_GET['ran'])); ?>
                 <div class="notice notice-success is-dismissible">
                     <?php if ($flag === 'queued'): ?>
                         <p>RSS-Polling wurde in die Hintergrund-Queue gelegt — läuft asynchron. Reload in ~30–90 Sekunden für aktualisierten Status.</p>
@@ -661,6 +662,22 @@ final class Settings
                         <th scope="row">Whisper-Fallback (OpenAI)</th>
                         <td>
                             <label><input type="checkbox" name="newss_whisper_enabled" value="1" <?php checked($whEnabled, 1); ?>> Aktivieren — wird probiert wenn Supadata + yt-dlp beide leer ausgehen</label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="newss_whisper_daily_cap">Whisper Max Calls / Tag</label></th>
+                        <td>
+                            <?php
+                            $whCap = (int) get_option('newss_whisper_daily_cap', 0);
+                            $whCalls = get_option('newss_whisper_calls_today', null);
+                            $whTodayCount = (is_array($whCalls) && ($whCalls['date'] ?? '') === wp_date('Y-m-d')) ? (int) $whCalls['count'] : 0;
+                            ?>
+                            <input type="number" id="newss_whisper_daily_cap" name="newss_whisper_daily_cap" value="<?php echo esc_attr((string) $whCap); ?>" min="0" max="10000" step="10">
+                            <p class="description">
+                                Hard-Cap pro Tag (Europe/Berlin). 0 = unbegrenzt.
+                                Heute bereits: <strong><?php echo (int) $whTodayCount; ?></strong> erfolgreiche Calls.
+                                Cost-Schätzung: ~$0.006 pro Minute Audio.
+                            </p>
                         </td>
                     </tr>
                     <tr>

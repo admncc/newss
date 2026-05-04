@@ -57,7 +57,7 @@ final class Status
         $statusCounts  = self::statusCounts();
         $channelFilter = isset($_GET['newss_channel']) ? sanitize_text_field(wp_unslash((string) $_GET['newss_channel'])) : '';
 
-        $page    = max(1, absint($_GET['newss_page'] ?? 1));
+        $page    = max(1, absint(wp_unslash($_GET['newss_page'] ?? 1)));
         $perPage = self::PER_PAGE;
 
         $since = new \DateTime('24 hours ago', new \DateTimeZone('UTC'));

@@ -50,7 +50,7 @@ final class Cron
         }
 
         if (!$current) {
-            $tz = new \DateTimeZone('Europe/Berlin');
+            $tz = wp_timezone();
             $now = new \DateTimeImmutable('now', $tz);
             $hour = (int) $now->format('H');
             $nextHour = ((int) ceil(($hour + 1) / 8)) * 8;
