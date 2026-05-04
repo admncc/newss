@@ -25,10 +25,17 @@ final class Transcript
 
         $supadataKey = (string) get_option('newss_supadata_api_key', '');
         if ($supadataKey !== '') {
-            $text = $this->fetchSupadata($videoId, $supadataKey);
-            if ($text !== '') {
-                $this->lastProvider = 'supadata';
-                return $text;
+            // Bei Supadata-Exception (429/5xx) NICHT zum Caller hochwerfen — sonst
+            // retried Action-Scheduler den ganzen Job mit gleicher Provider-Reihenfolge.
+            // Stattdessen fallen wir auf yt-dlp / Whisper zurück.
+            try {
+                $text = $this->fetchSupadata($videoId, $supadataKey);
+                if ($text !== '') {
+                    $this->lastProvider = 'supadata';
+                    return $text;
+                }
+            } catch (\Throwable $e) {
+                error_log('[newss] supadata fail, fallback: ' . $e->getMessage());
             }
         }
 

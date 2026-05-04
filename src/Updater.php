@@ -61,6 +61,12 @@ final class Updater
                     Wenn sich <code>composer.json</code> oder <code>composer.lock</code> geändert haben, läuft anschließend <code>composer install --no-dev -o</code>.
                     OPcache wird zurückgesetzt.
                 </p>
+                <p style="background:#fff8e1;border-left:4px solid #ffb900;padding:8px 12px;font-size:11px;max-width:780px">
+                    <strong>Sicherheitshinweis:</strong> Dieser Button führt effektiv beliebigen Code aus dem Remote-Repo
+                    <code><?php echo esc_html((string) $info['remote']); ?></code> auf dem Server aus.
+                    Stelle sicher dass der Remote vertrauenswürdig ist und nur Personen Zugriff auf diese Page
+                    haben, denen du auch Server-Shell-Zugriff geben würdest.
+                </p>
             </form>
         <?php endif; ?>
         <hr style="margin:32px 0">
@@ -73,6 +79,15 @@ final class Updater
             wp_die('Forbidden');
         }
         check_admin_referer('newss_git_update');
+
+        // Audit-Log: wer hat den Update getriggert
+        $user = wp_get_current_user();
+        error_log(sprintf(
+            '[newss] git update triggered by user_id=%d (%s) from IP=%s',
+            (int) ($user->ID ?? 0),
+            (string) ($user->user_login ?? '?'),
+            (string) ($_SERVER['REMOTE_ADDR'] ?? '?')
+        ));
 
         if (!function_exists('shell_exec')) {
             self::flash('error', 'shell_exec ist deaktiviert.');

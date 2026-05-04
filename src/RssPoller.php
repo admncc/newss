@@ -108,7 +108,10 @@ final class RssPoller
             if (self::videoAlreadyHandled($video['id'])) {
                 continue;
             }
-            set_transient(Worker::pendingTransientKey($video['id']), 1, DAY_IN_SECONDS);
+            // TTL = 7 Tage, gleich wie Action-Scheduler-Retention.
+            // Verhindert dass alte Pending-Transients vor dem AS-Job ablaufen
+            // und der Channel beim nächsten Poll dieselben Videos doppelt enqueued.
+            set_transient(Worker::pendingTransientKey($video['id']), 1, 7 * DAY_IN_SECONDS);
             \as_enqueue_async_action(
                 Worker::HOOK_PROCESS,
                 [[
