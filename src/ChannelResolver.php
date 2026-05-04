@@ -21,6 +21,15 @@ final class ChannelResolver
             return $this->fetchNameForId($m[1]);
         }
 
+        // Handle-Pfad: erst per offizieller API auflösen falls Key gesetzt
+        $handle = $this->extractHandle($input);
+        if ($handle !== '') {
+            $apiResult = $this->resolveViaApi($handle);
+            if ($apiResult !== null) {
+                return $apiResult;
+            }
+        }
+
         $url = $this->normalizeUrl($input);
         if ($url === null) {
             return null;
@@ -40,6 +49,48 @@ final class ChannelResolver
         return ['id' => $id, 'name' => $name];
     }
 
+    /**
+     * Holt die Channel-ID via YouTube Data API channels.list?forHandle=...
+     * Autoritativer als HTML-Scraping, nur möglich wenn API-Key vorhanden.
+     */
+    private function resolveViaApi(string $handle): ?array
+    {
+        $apiKey = trim((string) get_option('newss_youtube_api_key', ''));
+        if ($apiKey === '') {
+            return null;
+        }
+        $url = add_query_arg([
+            'part'      => 'snippet',
+            'forHandle' => '@' . ltrim($handle, '@'),
+            'key'       => $apiKey,
+        ], 'https://www.googleapis.com/youtube/v3/channels');
+
+        $resp = wp_remote_get($url, ['timeout' => 15]);
+        if (is_wp_error($resp) || (int) wp_remote_retrieve_response_code($resp) !== 200) {
+            return null;
+        }
+        $data = json_decode((string) wp_remote_retrieve_body($resp), true);
+        $item = $data['items'][0] ?? null;
+        if (!is_array($item) || empty($item['id'])) {
+            return null;
+        }
+        return [
+            'id'   => (string) $item['id'],
+            'name' => (string) ($item['snippet']['title'] ?? $item['id']),
+        ];
+    }
+
+    private function extractHandle(string $input): string
+    {
+        if (preg_match('#youtube\.com/@([A-Za-z0-9._-]+)#i', $input, $m)) {
+            return $m[1];
+        }
+        if (preg_match('/^@?([A-Za-z0-9._-]+)$/', $input, $m) && !preg_match('#^https?://#', $input)) {
+            return $m[1];
+        }
+        return '';
+    }
+
     private function normalizeUrl(string $input): ?string
     {
         if (preg_match('#^https?://#i', $input)) {
@@ -56,11 +107,19 @@ final class ChannelResolver
 
     private function extractId(string $html): ?string
     {
+        // Reihenfolge nach Vertrauenswürdigkeit:
+        // 1) canonical/og:url zeigen auf DIE aktuelle Seite (= echter Kanal)
+        // 2) itemprop=channelId — strukturiertes Markup vom Channel selbst
+        // 3) browseId — Channel-Browse-Context im YT-Player-State
+        // Erst zuletzt fallen wir auf "channelId" im Inline-JSON zurück, das
+        // auch in Sidebar/Empfehlungen vorkommt und falsch matchen kann.
         $patterns = [
-            '#"channelId":"(UC[A-Za-z0-9_-]{22})"#',
+            '#<link[^>]+rel=["\']canonical["\'][^>]+href=["\']https?://www\.youtube\.com/channel/(UC[A-Za-z0-9_-]{22})["\']#i',
+            '#<meta[^>]+property=["\']og:url["\'][^>]+content=["\']https?://www\.youtube\.com/channel/(UC[A-Za-z0-9_-]{22})["\']#i',
+            '#<meta[^>]+itemprop=["\'](?:identifier|channelId)["\'][^>]+content=["\'](UC[A-Za-z0-9_-]{22})["\']#i',
+            '#"browseId":"(UC[A-Za-z0-9_-]{22})"#',
             '#"externalId":"(UC[A-Za-z0-9_-]{22})"#',
-            '#<link[^>]+rel="canonical"[^>]+href="https?://www\.youtube\.com/channel/(UC[A-Za-z0-9_-]{22})"#',
-            '#<meta[^>]+itemprop="(?:identifier|channelId)"[^>]+content="(UC[A-Za-z0-9_-]{22})"#',
+            '#"channelId":"(UC[A-Za-z0-9_-]{22})"#',
             '#youtube\.com/channel/(UC[A-Za-z0-9_-]{22})#',
         ];
         foreach ($patterns as $rx) {
