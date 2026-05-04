@@ -26,6 +26,11 @@ final class RssPoller
             return;
         }
         error_log('[newss] pollAll: starting with ' . count($enabled) . ' channels');
+
+        // Auto-Cleanup von Stuck-Jobs (>10 Min. in-progress) -- belt-and-
+        // suspenders falls der action_scheduler_before_process_queue-Hook
+        // bei diesem Run nicht greift.
+        Worker::maybeAutoCleanup();
         set_transient('newss_poll_running', time(), 30 * MINUTE_IN_SECONDS);
         update_option('newss_last_cron_run', time(), false);
 

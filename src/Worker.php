@@ -16,6 +16,27 @@ final class Worker
         add_action('action_scheduler_before_execute', static function ($actionId): void {
             self::$currentActionId = (int) $actionId;
         });
+        // Auto-Cleanup: jedes Mal wenn AS-Runner anlaeuft, raeumen wir
+        // Stuck-Jobs (>10 Min. in-progress) automatisch auf -- rate-limited
+        // via Transient, damit's nicht bei jeder AS-Batch-Iteration laeuft.
+        add_action('action_scheduler_before_process_queue', [self::class, 'maybeAutoCleanup']);
+    }
+
+    public static function maybeAutoCleanup(): void
+    {
+        if (get_transient('newss_auto_cleanup_ran')) {
+            return;
+        }
+        // Marker bevor cleanup laeuft, damit ein evtl. Fatal nicht in
+        // Endlosschleife resultiert
+        set_transient('newss_auto_cleanup_ran', time(), 5 * MINUTE_IN_SECONDS);
+        $result = self::cleanupStuckJobs(10 * MINUTE_IN_SECONDS);
+        if ($result['cleared'] > 0) {
+            error_log(sprintf(
+                '[newss] auto-cleanup: %d stuck-job(s) failed-marked',
+                $result['cleared']
+            ));
+        }
     }
 
     public static function processVideo(array $payload): void
