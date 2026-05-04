@@ -278,18 +278,75 @@ final class Settings
                 <tr><th>yt-dlp</th><td><?php echo $ytDlpFound ? '<span style="color:#0a7">gefunden</span>' : '<span style="color:#c00">nicht gefunden</span>'; ?> (<code><?php echo esc_html($ytdlp); ?></code>)</td></tr>
                 <tr><th>ffmpeg</th><td><?php echo $ffmpegFound ? '<span style="color:#0a7">gefunden</span>' : '<span style="color:#c00">nicht gefunden</span>'; ?></td></tr>
                 <tr><th>Nächster Lauf (alle 8h, 3× täglich)</th><td><?php echo $nextRun ? esc_html(self::formatTime($nextRun)) : '—'; ?></td></tr>
+                <?php
+                $lastCron = (int) get_option('newss_last_cron_run', 0);
+                $cronAge = $lastCron > 0 ? time() - $lastCron : -1;
+                $cronColor = $cronAge < 0 ? '#c00' : ($cronAge > 16 * HOUR_IN_SECONDS ? '#c00' : ($cronAge > 12 * HOUR_IN_SECONDS ? '#b87000' : '#0a7'));
+                ?>
+                <tr><th>Letzter Cron-Lauf</th><td>
+                    <?php if ($lastCron > 0): ?>
+                        <span style="color:<?php echo esc_attr($cronColor); ?>">
+                            <?php echo esc_html(human_time_diff($lastCron) . ' her'); ?>
+                        </span>
+                        <span style="color:#999">(<?php echo esc_html(self::formatTime($lastCron)); ?>)</span>
+                        <?php if ($cronAge > 16 * HOUR_IN_SECONDS): ?>
+                            — <strong style="color:#c00">⚠ länger als 16h — Cron läuft nicht!</strong>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <span style="color:#c00">noch nie — System-Cron prüfen oder „Jetzt manuell pollen"</span>
+                    <?php endif; ?>
+                </td></tr>
                 <tr><th>Letztes Polling</th><td><?php
                     if (is_array($lastPoll)) {
                         $s = $lastPoll['stats'];
                         printf(
-                            '%s — Kanäle: %d, neue Videos: %d, Fehler: %d',
+                            '%s (%s her) — Kanäle: %d, neue Videos: %d, Fehler: %d',
                             esc_html(self::formatTime((int) $lastPoll['time'])),
+                            esc_html(human_time_diff((int) $lastPoll['time'])),
                             (int) $s['channels'], (int) $s['new'], (int) $s['errors']
                         );
                     } else { echo '—'; }
                 ?></td></tr>
                 </tbody>
             </table>
+
+            <?php
+            $providers = [
+                'youtube_api' => 'YouTube Data API',
+                'supadata'    => 'Supadata',
+                'whisper'     => 'OpenAI Whisper',
+            ];
+            $hasAnyHealth = false;
+            foreach ($providers as $key => $_label) {
+                if (get_option(Transcript::HEALTH_OPTION_PREFIX . $key, null)) {
+                    $hasAnyHealth = true;
+                    break;
+                }
+            }
+            if ($hasAnyHealth):
+            ?>
+            <h2 style="margin-top:24px">Provider-Health</h2>
+            <table class="widefat striped" style="max-width:780px">
+                <thead><tr><th style="width:30%">Provider</th><th style="width:80px">Status</th><th>Letzter Call</th><th>Hinweis</th></tr></thead>
+                <tbody>
+                <?php foreach ($providers as $key => $label):
+                    $h = get_option(Transcript::HEALTH_OPTION_PREFIX . $key, null);
+                    if (!is_array($h)) continue;
+                    $okBadge = !empty($h['ok'])
+                        ? '<span style="color:#0a7">✓ OK</span>'
+                        : '<span style="color:#c00">✗ Fehler</span>';
+                    $age = time() - (int) ($h['ts'] ?? 0);
+                    ?>
+                    <tr>
+                        <td><strong><?php echo esc_html($label); ?></strong></td>
+                        <td><?php echo $okBadge; ?></td>
+                        <td style="font-size:11px"><?php echo esc_html(human_time_diff((int) ($h['ts'] ?? 0)) . ' her'); ?></td>
+                        <td style="font-size:11px"><?php echo esc_html((string) ($h['note'] ?? '')); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+            <?php endif; ?>
             <p><a href="<?php echo esc_url($runUrl); ?>" class="button button-secondary">Jetzt manuell pollen</a></p>
 
             <p style="background:#fff8e1;border-left:4px solid #ffb900;padding:8px 12px;max-width:780px">

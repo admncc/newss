@@ -6,6 +6,17 @@ namespace Newss;
 
 final class Transcript
 {
+    public const HEALTH_OPTION_PREFIX = 'newss_health_';
+
+    public static function recordHealth(string $provider, bool $ok, string $note = ''): void
+    {
+        update_option(self::HEALTH_OPTION_PREFIX . $provider, [
+            'ok'     => $ok,
+            'note'   => $note,
+            'ts'     => time(),
+        ], false);
+    }
+
     public string $lastProvider = '';
 
     public function fetch(string $videoId): string
@@ -53,18 +64,22 @@ final class Transcript
         ]);
 
         if (is_wp_error($resp)) {
-            error_log('[newss] supadata error: ' . $resp->get_error_message());
+            $msg = $resp->get_error_message();
+            error_log('[newss] supadata error: ' . $msg);
+            self::recordHealth('supadata', false, 'network: ' . $msg);
             return '';
         }
         $code = (int) wp_remote_retrieve_response_code($resp);
         $body = (string) wp_remote_retrieve_body($resp);
         if ($code !== 200) {
             error_log("[newss] supadata HTTP {$code}: " . substr($body, 0, 500));
+            self::recordHealth('supadata', false, "HTTP {$code}");
             if ($code === 429 || $code >= 500) {
                 throw new \RuntimeException("Supadata HTTP {$code} — retryable");
             }
             return '';
         }
+        self::recordHealth('supadata', true, '');
         $data = json_decode($body, true);
         if (!is_array($data)) {
             return '';
@@ -169,13 +184,24 @@ final class Transcript
         $this->cleanup($tmpDir);
 
         if (is_wp_error($resp)) {
-            error_log('[newss] whisper error: ' . $resp->get_error_message());
+            $msg = $resp->get_error_message();
+            error_log('[newss] whisper error: ' . $msg);
+            self::recordHealth('whisper', false, 'network: ' . $msg);
             return '';
         }
-        if ((int) wp_remote_retrieve_response_code($resp) !== 200) {
-            error_log('[newss] whisper HTTP ' . wp_remote_retrieve_response_code($resp) . ': ' . wp_remote_retrieve_body($resp));
+        $whCode = (int) wp_remote_retrieve_response_code($resp);
+        if ($whCode !== 200) {
+            $body = (string) wp_remote_retrieve_body($resp);
+            error_log('[newss] whisper HTTP ' . $whCode . ': ' . $body);
+            $errCode = '';
+            $j = json_decode($body, true);
+            if (is_array($j) && isset($j['error']['code'])) {
+                $errCode = (string) $j['error']['code'];
+            }
+            self::recordHealth('whisper', false, "HTTP {$whCode}" . ($errCode ? " · {$errCode}" : ''));
             return '';
         }
+        self::recordHealth('whisper', true, '');
         return trim((string) wp_remote_retrieve_body($resp));
     }
 

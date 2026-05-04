@@ -191,8 +191,10 @@ final class RssPoller
                 set_transient('newss_yt_quota_exhausted', time(), $secondsUntilReset);
                 error_log('[newss] YT-API Quota erschöpft, Reset in ' . $secondsUntilReset . 's');
             }
+            Transcript::recordHealth('youtube_api', false, "HTTP {$code}" . ($errReason ? " · {$errReason}" : ''));
             throw new \RuntimeException('YT-API HTTP ' . $code . $errMsg);
         }
+        Transcript::recordHealth('youtube_api', true, '');
         $data = json_decode($body, true);
         if (!is_array($data) || !isset($data['items'])) {
             return [];
