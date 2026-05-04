@@ -13,6 +13,44 @@ final class Channels
         add_action('admin_post_newss_channel_save', [self::class, 'handleSave']);
         add_action('admin_post_newss_channel_delete', [self::class, 'handleDelete']);
         add_action('admin_post_newss_channel_toggle', [self::class, 'handleToggle']);
+        add_action('admin_post_newss_channel_bulk', [self::class, 'handleBulk']);
+    }
+
+    public static function handleBulk(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+        check_admin_referer('newss_channel_bulk');
+
+        $action = sanitize_key(wp_unslash((string) ($_POST['bulk_action'] ?? '')));
+        $ids    = array_map('strval', (array) ($_POST['ids'] ?? []));
+        $ids    = array_values(array_filter($ids, static fn(string $i): bool => preg_match('/^UC[A-Za-z0-9_-]{22}$/', $i) === 1));
+        if ($action === '' || $ids === []) {
+            self::flash('error', 'Keine Aktion oder keine Kanäle ausgewählt.');
+            self::redirect();
+        }
+
+        $channels = self::all();
+        $changed = 0;
+        if ($action === 'delete') {
+            $before = count($channels);
+            $channels = array_values(array_filter($channels, static fn(array $c): bool => !in_array((string) ($c['id'] ?? ''), $ids, true)));
+            $changed = $before - count($channels);
+        } elseif (in_array($action, ['enable', 'disable'], true)) {
+            foreach ($channels as $i => $ch) {
+                if (in_array((string) ($ch['id'] ?? ''), $ids, true)) {
+                    $newVal = $action === 'enable' ? 1 : 0;
+                    if ((int) ($ch['enabled'] ?? 0) !== $newVal) {
+                        $channels[$i]['enabled'] = $newVal;
+                        $changed++;
+                    }
+                }
+            }
+        }
+        update_option(self::OPTION_KEY, $channels, false);
+        self::flash('success', sprintf('Bulk-Aktion „%s" auf %d Kanäle angewendet.', $action, $changed));
+        self::redirect();
     }
 
     public static function renderSection(): void
@@ -106,20 +144,39 @@ final class Channels
 
         <h3 style="margin-top:24px">Aktive Kanäle (<?php echo count($channels); ?>)</h3>
         <?php if (!$channels): ?>
-            <p><em>Noch keine Kanäle konfiguriert.</em></p>
+            <div style="padding:14px 18px;border:1px solid #dcdcde;background:#f6f7f7;max-width:880px">
+                <p style="margin:0">Noch keine Kanäle konfiguriert. Oben einen Kanal hinzufügen — entweder per <code>@handle</code>, vollständiger URL oder direkter Channel-ID.</p>
+            </div>
         <?php else: ?>
-            <table class="widefat striped" style="max-width:880px">
-                <thead>
-                    <tr>
-                        <th style="width:25%">Name</th>
-                        <th>Channel-ID</th>
-                        <th>Kategorie</th>
-                        <th style="width:80px">Status</th>
-                        <th style="width:200px">Aktion</th>
-                    </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($channels as $ch):
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="max-width:880px">
+                <input type="hidden" name="action" value="newss_channel_bulk">
+                <?php wp_nonce_field('newss_channel_bulk'); ?>
+
+                <div style="margin:8px 0;display:flex;gap:8px;align-items:center">
+                    <label for="newss_bulk_action" style="font-weight:600">Bulk-Aktion:</label>
+                    <select name="bulk_action" id="newss_bulk_action">
+                        <option value="">— wählen —</option>
+                        <option value="enable">Aktivieren</option>
+                        <option value="disable">Deaktivieren</option>
+                        <option value="delete">Löschen</option>
+                    </select>
+                    <button type="submit" class="button" onclick="if(document.getElementById('newss_bulk_action').value === 'delete') return confirm('Ausgewählte Kanäle wirklich löschen?'); return true;">Anwenden</button>
+                    <span class="description">— erst Auswahl unten setzen, dann Aktion wählen + Anwenden</span>
+                </div>
+
+                <table class="widefat striped">
+                    <thead>
+                        <tr>
+                            <th style="width:30px"><input type="checkbox" onclick="document.querySelectorAll('input[name=\'ids[]\']').forEach(function(c){ c.checked = this.checked; }.bind(this))"></th>
+                            <th style="width:25%">Name</th>
+                            <th>Channel-ID</th>
+                            <th>Kategorie</th>
+                            <th style="width:80px">Status</th>
+                            <th style="width:200px">Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($channels as $ch):
                     $catName = $ch['category'] ? get_cat_name((int) $ch['category']) : '— Default —';
                     $editUrl = add_query_arg(
                         ['page' => 'newss-channels', 'edit' => rawurlencode((string) $ch['id'])],
@@ -137,6 +194,7 @@ final class Channels
                     $isCurrentlyEdited = $isEdit && $editing['id'] === $ch['id'];
                     ?>
                     <tr<?php echo $isCurrentlyEdited ? ' style="background:#fff8e1"' : ''; ?>>
+                        <td><input type="checkbox" name="ids[]" value="<?php echo esc_attr((string) $ch['id']); ?>"></td>
                         <td>
                             <strong><?php echo esc_html((string) $ch['name']); ?></strong><br>
                             <a href="https://www.youtube.com/channel/<?php echo esc_attr((string) $ch['id']); ?>" target="_blank" rel="noopener" style="font-size:11px">→ YouTube</a>
@@ -154,8 +212,9 @@ final class Channels
                         </td>
                     </tr>
                 <?php endforeach; ?>
-                </tbody>
-            </table>
+                    </tbody>
+                </table>
+            </form>
         <?php endif; ?>
         <script>
         document.addEventListener('click', function(e){

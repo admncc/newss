@@ -54,20 +54,24 @@ final class Status
             return;
         }
 
-        $statusCounts  = self::statusCounts();
-        $channelFilter = isset($_GET['newss_channel']) ? sanitize_text_field(wp_unslash((string) $_GET['newss_channel'])) : '';
+        $statusCounts   = self::statusCounts();
+        $channelFilter  = isset($_GET['newss_channel'])    ? sanitize_text_field(wp_unslash((string) $_GET['newss_channel']))    : '';
+        $effectiveFilter= isset($_GET['newss_effective'])  ? sanitize_key(wp_unslash((string) $_GET['newss_effective']))         : '';
 
         $page    = max(1, absint(wp_unslash($_GET['newss_page'] ?? 1)));
         $perPage = self::PER_PAGE;
 
         $since = new \DateTime('24 hours ago', new \DateTimeZone('UTC'));
 
-        if ($channelFilter !== '') {
+        $hasFilter = ($channelFilter !== '') || ($effectiveFilter !== '');
+        if ($hasFilter) {
             $allRows = self::fetchSince($since, 500, 0);
-            $allRows = array_values(array_filter(
-                $allRows,
-                static fn(array $r): bool => ($r['channel'] ?? '') === $channelFilter
-            ));
+            if ($channelFilter !== '') {
+                $allRows = array_values(array_filter($allRows, static fn(array $r): bool => ($r['channel'] ?? '') === $channelFilter));
+            }
+            if ($effectiveFilter !== '') {
+                $allRows = array_values(array_filter($allRows, static fn(array $r): bool => ($r['effective'] ?? '') === $effectiveFilter));
+            }
             $total = count($allRows);
             $totalPages = max(1, (int) ceil($total / $perPage));
             if ($page > $totalPages) {
@@ -101,11 +105,11 @@ final class Status
             <span style="margin-left:auto;color:#888;font-size:11px">— „complete" enthält <em>posted</em>, <em>skipped</em>, <em>orphan</em></span>
         </p>
 
-        <form method="get" action="" style="margin:8px 0 12px 0;display:flex;align-items:center;gap:8px">
+        <form method="get" action="" style="margin:8px 0 12px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <input type="hidden" name="page" value="newss-pipeline">
-            <label for="newss_channel" style="font-weight:600">Filter nach Kanal:</label>
+            <label for="newss_channel" style="font-weight:600">Kanal:</label>
             <select name="newss_channel" id="newss_channel" onchange="this.form.submit()">
-                <option value="">— Alle Kanäle —</option>
+                <option value="">— Alle —</option>
                 <?php
                 $names = [];
                 foreach ($channels as $ch) {
@@ -121,12 +125,34 @@ final class Status
                     </option>
                 <?php endforeach; ?>
             </select>
-            <?php if ($channelFilter !== ''): ?>
+
+            <label for="newss_effective" style="font-weight:600;margin-left:12px">Status:</label>
+            <select name="newss_effective" id="newss_effective" onchange="this.form.submit()">
+                <option value="">— Alle —</option>
+                <?php foreach (['pending'=>'Pending','in-progress'=>'Läuft','posted'=>'Posted','skipped'=>'Skipped','orphan'=>'Orphan','failed'=>'Failed'] as $val => $lbl): ?>
+                    <option value="<?php echo esc_attr($val); ?>" <?php selected($effectiveFilter, $val); ?>><?php echo esc_html($lbl); ?></option>
+                <?php endforeach; ?>
+            </select>
+
+            <?php if ($hasFilter): ?>
                 <a href="<?php echo esc_url($filterUrlBase); ?>" class="button button-small">Filter zurücksetzen</a>
             <?php endif; ?>
         </form>
         <?php if (!$rows): ?>
-            <p><em>Keine Jobs in der letzten 24 Stunden.</em></p>
+            <?php
+            $channels = (array) get_option('newss_channels', []);
+            $hasChannels = false;
+            foreach ($channels as $c) { if (!empty($c['enabled'])) { $hasChannels = true; break; } }
+            ?>
+            <div style="margin:20px 0;padding:14px 18px;border:1px solid #dcdcde;background:#f6f7f7;max-width:880px">
+                <?php if (!$hasChannels): ?>
+                    <p style="margin:0">Noch keine aktiven Kanäle — <a href="<?php echo esc_url(admin_url('admin.php?page=newss-channels')); ?>">jetzt einen Kanal hinzufügen</a>.</p>
+                <?php elseif ($hasFilter): ?>
+                    <p style="margin:0">Kein Job entspricht dem Filter. <a href="<?php echo esc_url($filterUrlBase); ?>">Filter zurücksetzen</a>.</p>
+                <?php else: ?>
+                    <p style="margin:0">Keine Jobs in der letzten 24 Stunden — der nächste Cron-Lauf legt neue Jobs an.</p>
+                <?php endif; ?>
+            </div>
         <?php else: ?>
             <table class="widefat striped" style="max-width:1280px">
                 <thead>
@@ -145,8 +171,8 @@ final class Status
                 <?php foreach ($rows as $r): ?>
                     <tr>
                         <td><?php echo self::statusBadge($r['effective']); ?></td>
-                        <td style="font-size:11px"><?php echo esc_html($r['created'] ?: '—'); ?></td>
-                        <td style="font-size:11px"><?php echo esc_html($r['updated'] ?: '—'); ?></td>
+                        <td style="font-size:11px"><?php echo esc_html($r['created'] ?: '—'); echo !empty($r['created_ts']) ? '<br><span style="color:#999">' . esc_html(human_time_diff((int) $r['created_ts']) . ' her') . '</span>' : ''; ?></td>
+                        <td style="font-size:11px"><?php echo esc_html($r['updated'] ?: '—'); echo !empty($r['updated_ts']) ? '<br><span style="color:#999">' . esc_html(human_time_diff((int) $r['updated_ts']) . ' her') . '</span>' : ''; ?></td>
                         <td>
                             <strong><?php echo esc_html($r['title']); ?></strong><br>
                             <a href="https://www.youtube.com/watch?v=<?php echo esc_attr($r['video_id']); ?>" target="_blank" rel="noopener" style="font-size:11px"><?php echo esc_html($r['video_id']); ?></a>
@@ -176,26 +202,30 @@ final class Status
                 <?php endforeach; ?>
                 </tbody>
             </table>
-            <?php echo self::renderPagination($page, $totalPages, $total, $channelFilter); ?>
+            <?php echo self::renderPagination($page, $totalPages, $total, $channelFilter, $effectiveFilter); ?>
         <?php endif; ?>
         <hr style="margin:32px 0">
         <?php
     }
 
-    private static function renderPagination(int $page, int $totalPages, int $total, string $channelFilter = ''): string
+    private static function renderPagination(int $page, int $totalPages, int $total, string $channelFilter = '', string $effectiveFilter = ''): string
     {
         $base = admin_url('admin.php?page=newss-pipeline');
         if ($channelFilter !== '') {
             $base = add_query_arg('newss_channel', $channelFilter, $base);
         }
+        if ($effectiveFilter !== '') {
+            $base = add_query_arg('newss_effective', $effectiveFilter, $base);
+        }
+        $isFiltered = $channelFilter !== '' || $effectiveFilter !== '';
         if ($totalPages <= 1) {
-            return '<p class="description" style="margin-top:8px">' . (int) $total . ' Jobs in letzter 24h' . ($channelFilter !== '' ? ' (gefiltert)' : '') . '.</p>';
+            return '<p class="description" style="margin-top:8px">' . (int) $total . ' Jobs in letzter 24h' . ($isFiltered ? ' (gefiltert)' : '') . '.</p>';
         }
         $out = '<p style="margin-top:12px;display:flex;align-items:center;gap:8px">';
         if ($page > 1) {
             $out .= sprintf('<a class="button" href="%s">‹ Zurück</a>', esc_url(add_query_arg('newss_page', $page - 1, $base)));
         }
-        $out .= sprintf('<span class="description">Seite %d / %d &nbsp;·&nbsp; %d Jobs gesamt%s (%d pro Seite)</span>', $page, $totalPages, $total, $channelFilter !== '' ? ' im gefilterten Kanal' : '', self::PER_PAGE);
+        $out .= sprintf('<span class="description">Seite %d / %d &nbsp;·&nbsp; %d Jobs gesamt%s (%d pro Seite)</span>', $page, $totalPages, $total, $isFiltered ? ' (gefiltert)' : '', self::PER_PAGE);
         if ($page < $totalPages) {
             $out .= sprintf('<a class="button" href="%s">Weiter ›</a>', esc_url(add_query_arg('newss_page', $page + 1, $base)));
         }
@@ -527,15 +557,19 @@ final class Status
             $lastLog  = $logs ? end($logs) : null;
 
             $updated = '';
+            $updatedTs = 0;
             if ($lastLog && !empty($lastLog['date'])) {
-                $updated = wp_date('Y-m-d H:i', $lastLog['date']->getTimestamp());
+                $updatedTs = $lastLog['date']->getTimestamp();
+                $updated = wp_date('Y-m-d H:i', $updatedTs);
             }
 
             $created = '';
+            $createdTs = 0;
             if (isset($createdMap[$r['action_id']])) {
                 try {
                     $cd = new \DateTime($createdMap[$r['action_id']], new \DateTimeZone('UTC'));
-                    $created = wp_date('Y-m-d H:i', $cd->getTimestamp());
+                    $createdTs = $cd->getTimestamp();
+                    $created = wp_date('Y-m-d H:i', $createdTs);
                 } catch (\Throwable) {
                     // ignore
                 }
@@ -586,7 +620,9 @@ final class Status
                 'channel'    => (string) ($payload['channel_name'] ?? ''),
                 'channel_id' => (string) ($payload['channel_id'] ?? ''),
                 'created'    => $created,
+                'created_ts' => $createdTs,
                 'updated'    => $updated,
+                'updated_ts' => $updatedTs,
                 'last_log'   => $lastLog ? self::shorten((string) ($lastLog['message'] ?? ''), 200) : '',
                 'post_url'   => $postUrl,
                 'edit_url'   => $editUrl,
