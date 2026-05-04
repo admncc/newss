@@ -13,6 +13,15 @@ final class ChannelResolver
             return null;
         }
 
+        // 1) Playlist-URLs/IDs (Prioritaet vor Channel weil
+        //    /watch?v=X&list=Y soll als Playlist behandelt werden)
+        if (preg_match('#[?&]list=([A-Za-z0-9_-]{13,})#', $input, $m)) {
+            return $this->resolvePlaylist($m[1]);
+        }
+        if (preg_match('/^(PL|OL|UU|RD|FL|LL)[A-Za-z0-9_-]{10,}$/', $input)) {
+            return $this->resolvePlaylist($input);
+        }
+
         if (preg_match('/^UC[A-Za-z0-9_-]{22}$/', $input)) {
             return $this->fetchNameForId($input);
         }
@@ -46,7 +55,46 @@ final class ChannelResolver
         }
 
         $name = $this->extractName($html) ?? $id;
-        return ['id' => $id, 'name' => $name];
+        return ['id' => $id, 'name' => $name, 'type' => 'channel'];
+    }
+
+    /**
+     * Loest eine Playlist-ID auf: erst via API (falls Key) fuer offiziellen
+     * Titel, sonst via RSS-Feed-Parse als Fallback.
+     */
+    private function resolvePlaylist(string $playlistId): ?array
+    {
+        $apiKey = trim((string) get_option('newss_youtube_api_key', ''));
+        if ($apiKey !== '') {
+            $url = add_query_arg([
+                'part' => 'snippet',
+                'id'   => $playlistId,
+                'key'  => $apiKey,
+            ], 'https://www.googleapis.com/youtube/v3/playlists');
+            $resp = wp_remote_get($url, ['timeout' => 15]);
+            if (!is_wp_error($resp) && (int) wp_remote_retrieve_response_code($resp) === 200) {
+                $data = json_decode((string) wp_remote_retrieve_body($resp), true);
+                $item = $data['items'][0] ?? null;
+                if (is_array($item) && isset($item['snippet']['title'])) {
+                    return [
+                        'id'   => $playlistId,
+                        'name' => (string) $item['snippet']['title'],
+                        'type' => 'playlist',
+                    ];
+                }
+            }
+        }
+
+        // Fallback: RSS-Feed der Playlist parsen
+        $body = $this->httpGet('https://www.youtube.com/feeds/videos.xml?playlist_id=' . rawurlencode($playlistId));
+        $name = $playlistId;
+        if ($body !== '' && preg_match('#<title>([^<]+)</title>#', $body, $m)) {
+            $candidate = trim(html_entity_decode($m[1], ENT_QUOTES));
+            if ($candidate !== '') {
+                $name = $candidate;
+            }
+        }
+        return ['id' => $playlistId, 'name' => $name, 'type' => 'playlist'];
     }
 
     /**
@@ -77,6 +125,7 @@ final class ChannelResolver
         return [
             'id'   => (string) $item['id'],
             'name' => (string) ($item['snippet']['title'] ?? $item['id']),
+            'type' => 'channel',
         ];
     }
 
@@ -159,7 +208,7 @@ final class ChannelResolver
                 $name = trim(html_entity_decode($m[1], ENT_QUOTES));
             }
         }
-        return ['id' => $channelId, 'name' => $name];
+        return ['id' => $channelId, 'name' => $name, 'type' => 'channel'];
     }
 
     private function httpGet(string $url): string

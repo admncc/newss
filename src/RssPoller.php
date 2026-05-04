@@ -107,9 +107,10 @@ final class RssPoller
      */
     public static function testChannel(array $channel): array
     {
-        $channelId = (string) ($channel['id'] ?? '');
-        if ($channelId === '') {
-            return ['ok' => false, 'total' => 0, 'new' => 0, 'skipped' => 0, 'error' => 'Channel-ID fehlt', 'samples' => []];
+        $sourceId = (string) ($channel['id'] ?? '');
+        $type     = (string) ($channel['type'] ?? 'channel');
+        if ($sourceId === '') {
+            return ['ok' => false, 'total' => 0, 'new' => 0, 'skipped' => 0, 'error' => 'Source-ID fehlt', 'samples' => []];
         }
         $method = (string) get_option('newss_youtube_method', 'rss');
         try {
@@ -118,9 +119,13 @@ final class RssPoller
                 if ($apiKey === '') {
                     throw new \RuntimeException('Methode = API gewählt, aber API-Key ist leer');
                 }
-                $videos = self::fetchViaApi($channelId, $apiKey);
+                $videos = $type === 'playlist'
+                    ? self::fetchPlaylistViaApi($sourceId, $apiKey)
+                    : self::fetchViaApi($sourceId, $apiKey);
             } else {
-                $videos = self::fetchViaRss($channelId);
+                $videos = $type === 'playlist'
+                    ? self::fetchPlaylistViaRss($sourceId)
+                    : self::fetchViaRss($sourceId);
             }
         } catch (\Throwable $e) {
             return ['ok' => false, 'total' => 0, 'new' => 0, 'skipped' => 0, 'error' => $e->getMessage(), 'samples' => []];
@@ -151,17 +156,22 @@ final class RssPoller
 
     private static function pollChannel(array $channel): int
     {
-        $channelId = (string) $channel['id'];
-        $method    = (string) get_option('newss_youtube_method', 'rss');
+        $sourceId = (string) $channel['id'];
+        $type     = (string) ($channel['type'] ?? 'channel');
+        $method   = (string) get_option('newss_youtube_method', 'rss');
 
         if ($method === 'api') {
             $apiKey = trim((string) get_option('newss_youtube_api_key', ''));
-            if ($method === 'api' && $apiKey === '') {
+            if ($apiKey === '') {
                 throw new \RuntimeException('Methode = API gewählt, aber API-Key ist leer');
             }
-            $videos = self::fetchViaApi($channelId, $apiKey);
+            $videos = $type === 'playlist'
+                ? self::fetchPlaylistViaApi($sourceId, $apiKey)
+                : self::fetchViaApi($sourceId, $apiKey);
         } else {
-            $videos = self::fetchViaRss($channelId);
+            $videos = $type === 'playlist'
+                ? self::fetchPlaylistViaRss($sourceId)
+                : self::fetchViaRss($sourceId);
         }
 
         $enqueued = 0;
@@ -178,7 +188,7 @@ final class RssPoller
                 [[
                     'video_id'     => $video['id'],
                     'video_title'  => $video['title'],
-                    'channel_id'   => $channelId,
+                    'channel_id'   => $sourceId,
                     'channel_name' => (string) ($channel['name'] ?? ''),
                     'category_id'  => (int) ($channel['category'] ?? 0),
                     'published'    => $video['published'],
@@ -207,9 +217,49 @@ final class RssPoller
             throw new \RuntimeException('YT-API: uploads-Playlist nicht ermittelbar für ' . $channelId);
         }
 
+        try {
+            return self::queryPlaylistItems($uploadsPlaylist, $apiKey);
+        } catch (\RuntimeException $e) {
+            // Bei HTTP 404 koennte die uploads-Playlist veraltet sein
+            // (Channel hat sie umbenannt/verschoben). Cache invalidieren
+            // und einmalig mit frischer Aufloesung retryen.
+            if (str_contains($e->getMessage(), 'HTTP 404')) {
+                delete_transient('newss_uploads_' . $channelId);
+                $uploadsPlaylist = self::resolveUploadsPlaylist($channelId, $apiKey);
+                if ($uploadsPlaylist === '') {
+                    throw new \RuntimeException('YT-API HTTP 404 + uploads-Playlist nicht auffindbar');
+                }
+                return self::queryPlaylistItems($uploadsPlaylist, $apiKey);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * @return array<int,array{id:string,title:string,published:string}>
+     */
+    private static function fetchPlaylistViaApi(string $playlistId, string $apiKey): array
+    {
+        if (!preg_match('/^[A-Za-z0-9_-]{13,}$/', $playlistId)) {
+            throw new \RuntimeException('Invalid playlist id format: ' . $playlistId);
+        }
+        if (get_transient('newss_yt_quota_exhausted')) {
+            throw new \RuntimeException('YT-API Daily-Quota erschöpft — wartet auf Reset (Pacific midnight)');
+        }
+        return self::queryPlaylistItems($playlistId, $apiKey);
+    }
+
+    /**
+     * Geteilter API-Call fuer playlistItems.list — sowohl fuer Channel-Uploads
+     * als auch User-Playlists.
+     *
+     * @return array<int,array{id:string,title:string,published:string}>
+     */
+    private static function queryPlaylistItems(string $playlistId, string $apiKey): array
+    {
         $url = add_query_arg([
             'part'       => 'snippet,contentDetails',
-            'playlistId' => $uploadsPlaylist,
+            'playlistId' => $playlistId,
             'maxResults' => 15,
             'key'        => $apiKey,
         ], 'https://www.googleapis.com/youtube/v3/playlistItems');
@@ -223,23 +273,7 @@ final class RssPoller
         }
         $code = (int) wp_remote_retrieve_response_code($response);
         $body = (string) wp_remote_retrieve_body($response);
-        if ($code === 404) {
-            // Cache stale invalidieren und einmal mit frisch-aufgelöster Playlist retry
-            delete_transient('newss_uploads_' . $channelId);
-            $uploadsPlaylist = self::resolveUploadsPlaylist($channelId, $apiKey);
-            if ($uploadsPlaylist === '') {
-                throw new \RuntimeException('YT-API HTTP 404 + uploads-Playlist nicht auffindbar');
-            }
-            $url = add_query_arg([
-                'part'       => 'snippet,contentDetails',
-                'playlistId' => $uploadsPlaylist,
-                'maxResults' => 15,
-                'key'        => $apiKey,
-            ], 'https://www.googleapis.com/youtube/v3/playlistItems');
-            $response = wp_remote_get($url, ['timeout' => 30]);
-            $code = (int) wp_remote_retrieve_response_code($response);
-            $body = (string) wp_remote_retrieve_body($response);
-        }
+
         if ($code !== 200) {
             $errMsg = '';
             $errReason = '';
@@ -326,9 +360,26 @@ final class RssPoller
      */
     private static function fetchViaRss(string $channelId): array
     {
+        return self::queryRssFeed('channel_id', $channelId);
+    }
+
+    /**
+     * @return array<int,array{id:string,title:string,published:string}>
+     */
+    private static function fetchPlaylistViaRss(string $playlistId): array
+    {
+        return self::queryRssFeed('playlist_id', $playlistId);
+    }
+
+    /**
+     * @return array<int,array{id:string,title:string,published:string}>
+     */
+    private static function queryRssFeed(string $param, string $id): array
+    {
         $url = sprintf(
-            'https://www.youtube.com/feeds/videos.xml?channel_id=%s',
-            rawurlencode($channelId)
+            'https://www.youtube.com/feeds/videos.xml?%s=%s',
+            $param,
+            rawurlencode($id)
         );
 
         $maxAttempts = 3;

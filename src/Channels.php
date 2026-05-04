@@ -74,7 +74,10 @@ final class Channels
 
         $action = sanitize_key(wp_unslash((string) ($_POST['bulk_action'] ?? '')));
         $ids    = array_map('strval', (array) ($_POST['ids'] ?? []));
-        $ids    = array_values(array_filter($ids, static fn(string $i): bool => preg_match('/^UC[A-Za-z0-9_-]{22}$/', $i) === 1));
+        $ids    = array_values(array_filter($ids, static fn(string $i): bool =>
+            preg_match('/^UC[A-Za-z0-9_-]{22}$/', $i) === 1
+            || preg_match('/^(PL|OL|UU|RD|FL|LL)[A-Za-z0-9_-]{10,}$/', $i) === 1
+        ));
         if ($action === '' || $ids === []) {
             self::flash('error', 'Keine Aktion oder keine Kanäle ausgewählt.');
             self::redirect();
@@ -146,12 +149,15 @@ final class Channels
 
             <table class="form-table" role="presentation">
                 <tr>
-                    <th scope="row" style="width:160px"><label for="newss_ch_input">Kanal-Link / Handle / ID</label></th>
+                    <th scope="row" style="width:160px"><label for="newss_ch_input">Kanal- oder Playlist-Quelle</label></th>
                     <td>
                         <input type="text" id="newss_ch_input" name="input" class="large-text" required
                                value="<?php echo esc_attr($isEdit ? (string) $editing['id'] : ''); ?>"
-                               placeholder="https://www.youtube.com/@phoenix  oder  @phoenix  oder  UCwyiPnNlT8UABRmGmU0T9jg">
-                        <p class="description">URL, <code>@handle</code> oder direkte Channel-ID. Wird neu aufgelöst — du kannst hier z.&nbsp;B. eine veraltete ID durch das aktuelle Handle ersetzen.</p>
+                               placeholder="@phoenix  oder  https://www.youtube.com/playlist?list=PL…  oder  UCwyiPnNlT8UABRmGmU0T9jg">
+                        <p class="description">
+                            Akzeptiert: Channel-URL/<code>@handle</code>/Channel-ID (UC…) <strong>oder</strong>
+                            Playlist-URL/Playlist-ID (PL…, OL…, UU…). Wird automatisch aufgelöst.
+                        </p>
                     </td>
                 </tr>
                 <tr>
@@ -245,12 +251,20 @@ final class Channels
                     );
                     $isActive = !empty($ch['enabled']);
                     $isCurrentlyEdited = $isEdit && $editing['id'] === $ch['id'];
+                    $type = (string) ($ch['type'] ?? 'channel');
+                    $ytUrl = $type === 'playlist'
+                        ? 'https://www.youtube.com/playlist?list=' . rawurlencode((string) $ch['id'])
+                        : 'https://www.youtube.com/channel/' . rawurlencode((string) $ch['id']);
                     ?>
                     <tr<?php echo $isCurrentlyEdited ? ' style="background:#fff8e1"' : ''; ?>>
                         <td><input type="checkbox" name="ids[]" value="<?php echo esc_attr((string) $ch['id']); ?>"></td>
                         <td>
-                            <strong><?php echo esc_html((string) $ch['name']); ?></strong><br>
-                            <a href="https://www.youtube.com/channel/<?php echo esc_attr((string) $ch['id']); ?>" target="_blank" rel="noopener" style="font-size:11px">→ YouTube</a>
+                            <strong><?php echo esc_html((string) $ch['name']); ?></strong>
+                            <?php if ($type === 'playlist'): ?>
+                                <span style="display:inline-block;padding:1px 6px;background:#e6f0ff;color:#0040b0;border-radius:3px;font-size:10px;font-weight:500;margin-left:4px;vertical-align:middle">Playlist</span>
+                            <?php endif; ?>
+                            <br>
+                            <a href="<?php echo esc_url($ytUrl); ?>" target="_blank" rel="noopener" style="font-size:11px">→ YouTube</a>
                         </td>
                         <td><code style="font-size:11px"><?php echo esc_html((string) $ch['id']); ?></code></td>
                         <td><?php echo esc_html((string) $catName); ?></td>
@@ -307,6 +321,7 @@ final class Channels
         $entry = [
             'id'       => (string) $resolved['id'],
             'name'     => $name,
+            'type'     => (string) ($resolved['type'] ?? 'channel'),
             'category' => absint($_POST['category'] ?? 0),
             'enabled'  => !empty($_POST['enabled']) ? 1 : 0,
         ];
