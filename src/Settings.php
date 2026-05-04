@@ -29,6 +29,61 @@ final class Settings
         add_action('wp_ajax_newss_poll_progress', [self::class, 'handleAjaxPollProgress']);
         add_action('wp_ajax_newss_pipeline_live', [self::class, 'handleAjaxPipelineLive']);
         add_action('admin_post_newss_cleanup_stuck', [self::class, 'handleCleanupStuck']);
+        add_action('admin_post_newss_run_queue', [self::class, 'handleRunQueue']);
+    }
+
+    public static function handleRunQueue(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Forbidden');
+        }
+        check_admin_referer('newss_run_queue');
+
+        set_transient('newss_pipeline_notice', [
+            'type'    => 'success',
+            'message' => 'Queue-Runner gestartet — laufende Pending-Jobs werden im Hintergrund abgearbeitet. Live-Box oben aktualisiert sich automatisch.',
+        ], 30);
+
+        wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_PIPELINE));
+
+        @ignore_user_abort(true);
+        @set_time_limit(600);
+        if (function_exists('fastcgi_finish_request')) {
+            @fastcgi_finish_request();
+        } else {
+            if (!headers_sent()) {
+                header('Connection: close');
+                header('Content-Length: 0');
+            }
+            while (ob_get_level() > 0) { @ob_end_flush(); }
+            @flush();
+        }
+
+        self::runAsQueue();
+        exit;
+    }
+
+    /**
+     * Triggert den AS-QueueRunner im aktuellen Prozess.
+     * Erwartet vorher fastcgi_finish_request() / Connection-Close,
+     * sonst blockt der User-Redirect bis alle Pending-Jobs durch sind.
+     */
+    private static function runAsQueue(): void
+    {
+        if (!class_exists('\\ActionScheduler')) {
+            return;
+        }
+        // Stale AS-Lock-Transients aufraeumen die einen toten Vorgaenger-Run
+        // blockieren koennten
+        delete_transient('action_scheduler_lock_runner');
+        delete_transient('action_scheduler_lock_async-request-runner');
+
+        try {
+            \ActionScheduler::runner()->run('Newss-Manual-Queue');
+            error_log('[newss] runAsQueue: completed');
+        } catch (\Throwable $e) {
+            error_log('[newss] runAsQueue exception: ' . $e->getMessage());
+        }
     }
 
     public static function handleCleanupStuck(): void
@@ -58,8 +113,29 @@ final class Settings
             $msg .= ' FEHLER: ' . implode(' | ', $result['errors']);
         }
         $type = !empty($result['errors']) ? 'error' : ($result['cleared'] > 0 ? 'success' : 'info');
+        if ($result['cleared'] > 0) {
+            $msg .= ' Queue-Runner wird im Hintergrund gestartet.';
+        }
         set_transient('newss_pipeline_notice', ['type' => $type, 'message' => $msg], 30);
         wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_PIPELINE));
+
+        // Bei erfolgreichem Cleanup: AS-Queue im Hintergrund anstossen,
+        // damit die freigegebenen + bereits pending Jobs sofort laufen.
+        if ($result['cleared'] > 0) {
+            @ignore_user_abort(true);
+            @set_time_limit(600);
+            if (function_exists('fastcgi_finish_request')) {
+                @fastcgi_finish_request();
+            } else {
+                if (!headers_sent()) {
+                    header('Connection: close');
+                    header('Content-Length: 0');
+                }
+                while (ob_get_level() > 0) { @ob_end_flush(); }
+                @flush();
+            }
+            self::runAsQueue();
+        }
         exit;
     }
 

@@ -291,15 +291,25 @@ final class Status
             <ul id="newss-pl-list" style="margin:0;padding:0;list-style:none;font-size:12px;max-height:320px;overflow:auto"></ul>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:10px;flex-wrap:wrap">
                 <p style="margin:0;font-size:11px;color:#999">Aktualisiert sich alle 4 Sekunden — kein Page-Reload nötig.</p>
-                <form method="post" action="<?php echo esc_url($cleanupUrl); ?>" style="margin:0">
-                    <input type="hidden" name="action" value="newss_cleanup_stuck">
-                    <input type="hidden" name="threshold" value="900">
-                    <?php wp_nonce_field('newss_cleanup_stuck'); ?>
-                    <button type="submit" class="button button-small"
-                            onclick="return confirm('Jobs die laenger als 15 Min. auf in-progress stehen als failed markieren und zugehoerige Locks freigeben?');">
-                        Stuck-Jobs aufräumen (&gt; 15 Min.)
-                    </button>
-                </form>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <form method="post" action="<?php echo esc_url($cleanupUrl); ?>" style="margin:0">
+                        <input type="hidden" name="action" value="newss_run_queue">
+                        <?php wp_nonce_field('newss_run_queue'); ?>
+                        <button type="submit" class="button button-small button-primary"
+                                title="Queue-Runner im Hintergrund anstossen — verarbeitet Pending-Jobs sofort statt auf naechsten Cron-Tick zu warten">
+                            Pending jetzt verarbeiten
+                        </button>
+                    </form>
+                    <form method="post" action="<?php echo esc_url($cleanupUrl); ?>" style="margin:0">
+                        <input type="hidden" name="action" value="newss_cleanup_stuck">
+                        <input type="hidden" name="threshold" value="900">
+                        <?php wp_nonce_field('newss_cleanup_stuck'); ?>
+                        <button type="submit" class="button button-small"
+                                onclick="return confirm('Jobs die laenger als 15 Min. auf in-progress stehen als failed markieren und zugehoerige Locks freigeben?');">
+                            Stuck-Jobs aufräumen (&gt; 15 Min.)
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
         <script>
