@@ -50,6 +50,38 @@ final class Worker
         }
 
         try {
+            // 3-stufiger Topic-Filter (nur wirksam bei Aktion=skip,
+            // bei Aktion=draft muss eh die volle Pipeline laufen):
+            //   Stage 1 (gratis, lokal):  Stichwort-Heuristik auf Titel
+            //   Stage 2 (~0,001 USD):     Haiku-Pre-Classify auf Titel+Channel
+            //   Stage 3 (regulaer):       Post-Rewrite topic_tags-Check (unten)
+            if ((int) get_option('newss_preclassify_enabled', 1) === 1
+                && (string) get_option('newss_blocked_action', 'skip') === 'skip') {
+                $blocked = array_values(array_filter((array) get_option('newss_blocked_topics', [])));
+                if ($blocked !== []) {
+                    $title   = (string) ($payload['video_title'] ?? '');
+                    $channel = (string) ($payload['channel_name'] ?? '');
+
+                    // Stage 1: Heuristik
+                    $heur = Anthropic::heuristicTopicCheck($title, $blocked);
+                    if ($heur !== []) {
+                        self::skip('heuristic hit: ' . implode(',', $heur) . ' (Titel-Stichwort)', $videoId);
+                        return;
+                    }
+
+                    // Stage 2: Haiku
+                    $preTags = (new Anthropic())->preClassifyTopics($title, $channel);
+                    if (is_array($preTags)) {
+                        $hits = array_values(array_intersect($preTags, $blocked));
+                        if ($hits !== []) {
+                            self::skip('haiku-preclassify hit: ' . implode(',', $hits) . ' (kein Transcript geholt)', $videoId);
+                            return;
+                        }
+                        self::log('preclassify ok: ' . ($preTags === [] ? 'no topics' : implode(',', $preTags)));
+                    }
+                }
+            }
+
             $tx = new Transcript();
             $transcript = $tx->fetch($videoId);
             if ($transcript === '' || mb_strlen($transcript) < 50) {

@@ -224,6 +224,99 @@ final class Anthropic
         ];
     }
 
+    /**
+     * Schneller Pre-Filter: nur Video-Titel + Channel an Haiku, nur Topic-Tags
+     * zurueck. Spart Transcript-Fetch + grossen Rewrite-Call wenn das Thema
+     * blockiert wird (Whisper-$, Anthropic-Token).
+     *
+     * Returns array<string> der Topic-Tag-Keys oder null bei Fehler / kein
+     * API-Key / Cap erreicht. Fail-open: bei null laesst der Caller den
+     * normalen Flow weiterlaufen — der Post-Rewrite-Check faengt's dann.
+     */
+    public function preClassifyTopics(string $title, string $channel): ?array
+    {
+        $apiKey = (string) get_option('newss_anthropic_api_key', '');
+        if ($apiKey === '') {
+            return null;
+        }
+        if (!self::canMakeCall()) {
+            error_log('[newss] preclassify skipped: anthropic daily cap reached');
+            return null;
+        }
+
+        $model = (string) get_option('newss_preclassify_model', 'claude-haiku-4-5-20251001');
+
+        $tool = [
+            'name'        => 'classify_topics',
+            'description' => 'Klassifiziere das Video-Thema in sensible Kategorien.',
+            'input_schema' => [
+                'type'     => 'object',
+                'required' => ['topic_tags'],
+                'properties' => [
+                    'topic_tags' => [
+                        'type'  => 'array',
+                        'items' => [
+                            'type' => 'string',
+                            'enum' => array_keys(self::topicLabels()),
+                        ],
+                        'description' => 'Sensible Themen die das Hauptthema des Videos beruehren. Leeres Array wenn keins zutrifft.',
+                    ],
+                ],
+            ],
+        ];
+
+        $userPrompt = sprintf(
+            "Klassifiziere ein YouTube-Video anhand von Titel und Kanal in sensible Themen-Kategorien.\n\nTitel: %s\nKanal: %s\n\nGib ALLE zutreffenden Topic-Tags zurueck. Wenn das Hauptthema in keine Kategorie faellt, leeres Array.",
+            $title,
+            $channel
+        );
+
+        $body = [
+            'model'       => $model,
+            'max_tokens'  => 200,
+            'temperature' => 0.0,
+            'messages'    => [[
+                'role'    => 'user',
+                'content' => $userPrompt,
+            ]],
+            'tools'       => [$tool],
+            'tool_choice' => ['type' => 'tool', 'name' => 'classify_topics'],
+        ];
+
+        $resp = wp_remote_post(self::API_URL, [
+            'timeout' => 30,
+            'headers' => [
+                'x-api-key'         => $apiKey,
+                'anthropic-version' => self::API_VERSION,
+                'content-type'      => 'application/json',
+            ],
+            'body' => wp_json_encode($body),
+        ]);
+
+        if (is_wp_error($resp)) {
+            error_log('[newss] preclassify network error: ' . $resp->get_error_message());
+            return null;
+        }
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        if ($code !== 200) {
+            error_log('[newss] preclassify HTTP ' . $code . ': ' . substr((string) wp_remote_retrieve_body($resp), 0, 200));
+            return null;
+        }
+        self::recordSuccessfulCall();
+
+        $data = json_decode((string) wp_remote_retrieve_body($resp), true);
+        if (!is_array($data)) {
+            return null;
+        }
+        foreach (($data['content'] ?? []) as $block) {
+            if (($block['type'] ?? '') === 'tool_use' && ($block['name'] ?? '') === 'classify_topics') {
+                $tags = (array) ($block['input']['topic_tags'] ?? []);
+                return array_values(array_filter($tags, 'is_string'));
+            }
+        }
+        return null;
+    }
+
     public static function topicLabels(): array
     {
         return [
@@ -235,6 +328,85 @@ final class Anthropic
             'extremismus-hass'         => 'Extremismus & Hassrede',
             'terror'                   => 'Terrorismus',
         ];
+    }
+
+    /**
+     * Heuristik-Stichworte pro Topic — wenn klare Treffer im Titel sind,
+     * brauchen wir keinen Haiku-Call. Konservativ angesetzt, nur eindeutige
+     * Begriffe — bei Grenzfaellen faellt der Caller auf preClassifyTopics()
+     * zurueck.
+     *
+     * @return array<string,array<string>>
+     */
+    public static function topicKeywords(): array
+    {
+        return [
+            'krieg-konflikt' => [
+                'krieg', 'kriegs',
+                'panzerangriff', 'raketenangriff', 'luftangriff', 'bombardierung', 'frontlinie',
+                'invasion', 'militärschlag', 'gefallen im',
+                'ukraine-krieg', 'gaza-krieg', 'nahost-konflikt',
+            ],
+            'gewalt-verbrechen' => [
+                'mord', 'mordfall', 'mordversuch', 'totschlag',
+                'erstochen', 'erschossen', 'erschlagen',
+                'überfallen', 'überfall', 'amoklauf', 'amokläufer',
+                'vergewaltigung', 'missbraucht', 'kindesmissbrauch',
+            ],
+            'sex-erotik' => [
+                'porno', 'pornografi', 'sex-tape', 'onlyfans',
+                'erotik', 'erotische', 'fetisch',
+                'nacktbild', 'nudes', 'sexszene',
+            ],
+            'suizid-selbstverletzung' => [
+                'suizid', 'selbstmord', 'selbsttötung',
+                'selbstverletzung', 'sich das leben', 'sprung in den tod',
+                'magersucht', 'essstörung',
+            ],
+            'drogen-sucht' => [
+                'kokain', 'heroin', 'crystal meth', 'crack',
+                'fentanyl', 'überdosis', 'drogensucht', 'drogenabhängig',
+                'drogentoter',
+            ],
+            'extremismus-hass' => [
+                'rechtsextrem', 'linksextrem', 'neonazi', 'reichsbürger',
+                'islamist', 'antisemit', 'rassistisch', 'fremdenfeindlich',
+                'volksverhetzung', 'hassrede',
+            ],
+            'terror' => [
+                'terroranschlag', 'terrorist', 'attentat',
+                'sprengstoffanschlag', 'selbstmordanschlag',
+                'isis-', ' isis ', 'al-qaida', 'hamas-terror',
+            ],
+        ];
+    }
+
+    /**
+     * Stage-1-Pre-Filter (gratis, lokal): pruef Video-Titel gegen
+     * Topic-Stichworte. Liefert die Liste der Topic-Keys mit Treffer
+     * — nur die, die in $blockedTopics sind, werden ueberhaupt geprueft.
+     *
+     * @param array<string> $blockedTopics
+     * @return array<string>
+     */
+    public static function heuristicTopicCheck(string $title, array $blockedTopics): array
+    {
+        if ($title === '' || $blockedTopics === []) {
+            return [];
+        }
+        $haystack = ' ' . mb_strtolower($title) . ' ';
+        $hits = [];
+        $allKeywords = self::topicKeywords();
+        foreach ($blockedTopics as $topic) {
+            $words = $allKeywords[$topic] ?? [];
+            foreach ($words as $word) {
+                if (mb_strpos($haystack, mb_strtolower($word)) !== false) {
+                    $hits[] = $topic;
+                    break;
+                }
+            }
+        }
+        return array_values(array_unique($hits));
     }
 
     public static function categoryList(): array

@@ -365,6 +365,7 @@ final class Settings
             'newss_category_list'          => [self::class, 'sanitizeMultiline'],
             'newss_blocked_topics'         => [self::class, 'sanitizeBlockedTopics'],
             'newss_blocked_action'         => [self::class, 'sanitizeBlockedAction'],
+            'newss_preclassify_enabled'    => 'absint',
             'newss_default_status'         => [self::class, 'sanitizeStatus'],
             'newss_kill_switch_drafts'     => 'absint',
             'newss_post_author'            => 'absint',
@@ -964,7 +965,8 @@ final class Settings
         $catList       = (string) get_option('newss_category_list', Anthropic::defaultCategoriesText());
         $defStatus     = (string) get_option('newss_default_status', 'publish');
         $blockedTopics = (array)  get_option('newss_blocked_topics', []);
-        $blockedAction = (string) get_option('newss_blocked_action', 'skip');
+        $blockedAction    = (string) get_option('newss_blocked_action', 'skip');
+        $preclassifyOn    = (int) get_option('newss_preclassify_enabled', 1);
         $killSwitch    = (int)    get_option('newss_kill_switch_drafts', 0);
         $postAuthor    = (int)    get_option('newss_post_author', 0);
         ?>
@@ -1032,6 +1034,22 @@ final class Settings
                         <td>
                             <label style="margin-right:20px"><input type="radio" name="newss_blocked_action" value="skip" <?php checked($blockedAction, 'skip'); ?>> Überspringen (kein Post)</label>
                             <label><input type="radio" name="newss_blocked_action" value="draft" <?php checked($blockedAction, 'draft'); ?>> Als Entwurf anlegen (zur manuellen Sichtung)</label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Pre-Filter (3 Stufen)</th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="newss_preclassify_enabled" value="1" <?php checked($preclassifyOn, 1); ?>>
+                                Vor Transcript-Fetch Titel + Channel prüfen — bei Treffer wird <em>vor</em> Whisper- und Rewrite-Call abgebrochen.
+                            </label>
+                            <p class="description">
+                                Drei Stufen, hintereinandergeschaltet:<br>
+                                &nbsp;&nbsp;<strong>1.</strong> Stichwort-Heuristik auf Titel (gratis, lokal)<br>
+                                &nbsp;&nbsp;<strong>2.</strong> Claude Haiku auf Titel + Channel (~0,001 USD/Video, nur falls Stufe 1 nichts findet)<br>
+                                &nbsp;&nbsp;<strong>3.</strong> Reguläre Topic-Tags-Prüfung nach dem Claude-Rewrite (Final-Check, läuft immer)<br>
+                                Wirkt nur bei <strong>Aktion = Überspringen</strong>; bei „Als Entwurf anlegen" muss die volle Pipeline laufen.
+                            </p>
                         </td>
                     </tr>
                     <tr>
