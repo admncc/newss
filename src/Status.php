@@ -294,7 +294,7 @@ final class Status
             <p style="margin:0 0 8px 0;font-size:12px;color:#666" id="newss-pl-counts">—</p>
             <ul id="newss-pl-list" style="margin:0;padding:0;list-style:none;font-size:12px;max-height:320px;overflow:auto"></ul>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:10px;flex-wrap:wrap">
-                <p style="margin:0;font-size:11px;color:#999">Aktualisiert sich alle 30 Sekunden — kein Page-Reload nötig.</p>
+                <p style="margin:0;font-size:11px;color:#999">Aktualisiert sich alle 10 Sekunden — kein Page-Reload nötig.</p>
                 <div style="display:flex;gap:6px;flex-wrap:wrap">
                     <form method="post" action="<?php echo esc_url($cleanupUrl); ?>" style="margin:0">
                         <input type="hidden" name="action" value="newss_run_queue">
@@ -388,7 +388,7 @@ final class Status
                     .catch(function(){ /* network blip */ });
             }
             tick();
-            var timer = setInterval(tick, 30000);
+            var timer = setInterval(tick, 10000);
             // Hard-Stop nach 30 Min damit der Tab nicht ewig pollt
             setTimeout(function(){ stopped = true; clearInterval(timer); }, 30 * 60 * 1000);
         })();
