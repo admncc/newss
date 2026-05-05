@@ -22,7 +22,7 @@ final class Worker
             self::$currentActionId = (int) $actionId;
         });
         // Auto-Cleanup: jedes Mal wenn AS-Runner anlaeuft, raeumen wir
-        // Stuck-Jobs (>10 Min. in-progress) automatisch auf -- rate-limited
+        // Stuck-Jobs (>5 Min. in-progress) automatisch auf -- rate-limited
         // via Transient, damit's nicht bei jeder AS-Batch-Iteration laeuft.
         add_action('action_scheduler_before_process_queue', [self::class, 'maybeAutoCleanup']);
     }
@@ -35,7 +35,7 @@ final class Worker
         // Marker bevor cleanup laeuft, damit ein evtl. Fatal nicht in
         // Endlosschleife resultiert
         set_transient('newss_auto_cleanup_ran', time(), 5 * MINUTE_IN_SECONDS);
-        $result = self::cleanupStuckJobs(10 * MINUTE_IN_SECONDS);
+        $result = self::cleanupStuckJobs(5 * MINUTE_IN_SECONDS);
         if ($result['cleared'] > 0) {
             error_log(sprintf(
                 '[newss] auto-cleanup: %d stuck-job(s) failed-marked',
@@ -244,7 +244,7 @@ final class Worker
      *
      * @return array{cleared:int, jobs:array<int,array<string,string>>, poll_mutex:bool, errors:array<int,string>}
      */
-    public static function cleanupStuckJobs(int $thresholdSec = 900): array
+    public static function cleanupStuckJobs(int $thresholdSec = 300): array
     {
         global $wpdb;
         $out = ['cleared' => 0, 'jobs' => [], 'poll_mutex' => false, 'errors' => []];

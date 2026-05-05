@@ -262,7 +262,7 @@ final class Transcript
         ]);
 
         $resp = wp_remote_post('https://api.openai.com/v1/audio/transcriptions', [
-            'timeout' => 600,
+            'timeout' => 180,
             'headers' => [
                 'Authorization' => 'Bearer ' . $apiKey,
                 'Content-Type'  => "multipart/form-data; boundary={$boundary}",

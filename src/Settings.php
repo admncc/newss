@@ -1009,7 +1009,7 @@ final class Settings
 
             <p style="background:#fff8e1;border-left:4px solid #ffb900;padding:8px 12px;max-width:780px">
                 <strong>Empfehlung:</strong> Trag auf dem Server diesen System-Cron ein und deaktiviere WP-Cron in <code>wp-config.php</code>:<br>
-                <code>0 */3 * * * curl -s <?php echo esc_html(home_url('/wp-cron.php?doing_wp_cron')); ?> &gt; /dev/null</code><br>
+                <code>*/5 * * * * curl -s <?php echo esc_html(home_url('/wp-cron.php?doing_wp_cron')); ?> &gt; /dev/null 2&gt;&amp;1</code><br>
                 <code>define('DISABLE_WP_CRON', true);</code>
             </p>
 

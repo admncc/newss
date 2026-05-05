@@ -274,7 +274,7 @@ final class Status
                     'started_ts'  => $startedTs,
                     'started_ago' => $startedTs > 0 ? self::timeAgoDe($startedTs) : '—',
                     'age_sec'     => $ageSec,
-                    'stale'       => $ageSec > 600, // > 10 min
+                    'stale'       => $ageSec > 300, // > 5 min
                     'last_log'    => $lastLog ? self::shorten((string) ($lastLog['message'] ?? ''), 140) : '',
                 ];
             }
@@ -306,11 +306,11 @@ final class Status
                     </form>
                     <form method="post" action="<?php echo esc_url($cleanupUrl); ?>" style="margin:0">
                         <input type="hidden" name="action" value="newss_cleanup_stuck">
-                        <input type="hidden" name="threshold" value="600">
+                        <input type="hidden" name="threshold" value="300">
                         <?php wp_nonce_field('newss_cleanup_stuck'); ?>
                         <button type="submit" class="button button-small"
-                                onclick="return confirm('Jobs die laenger als 10 Min. auf in-progress stehen als failed markieren und zugehoerige Locks freigeben?');">
-                            Stuck-Jobs aufräumen (&gt; 10 Min.)
+                                onclick="return confirm('Jobs die laenger als 5 Min. auf in-progress stehen als failed markieren und zugehoerige Locks freigeben?');">
+                            Stuck-Jobs aufräumen (&gt; 5 Min.)
                         </button>
                     </form>
                 </div>
