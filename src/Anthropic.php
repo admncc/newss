@@ -13,14 +13,19 @@ final class Anthropic
     {
         $apiKey = (string) get_option('newss_anthropic_api_key', '');
         if ($apiKey === '') {
-            error_log('[newss] missing Anthropic API key');
+            Logger::error('anthropic: missing API key');
             return null;
         }
 
         if (!self::canMakeCall()) {
-            error_log('[newss] daily Anthropic call cap reached; skipping');
+            Logger::warn('anthropic: daily cap reached, skipping');
             return null;
         }
+        $startTs = microtime(true);
+        Logger::info('anthropic: rewrite start', [
+            'video' => (string) ($payload['video_id'] ?? ''),
+            'chars' => mb_strlen($transcript),
+        ]);
 
         $model       = (string) get_option('newss_anthropic_model', 'claude-sonnet-4-6');
         $maxTokens   = (int) get_option('newss_anthropic_max_tokens', 4000);
@@ -79,12 +84,16 @@ final class Anthropic
 
             if ($code === 200) {
                 self::recordSuccessfulCall();
+                Logger::info('anthropic: rewrite ok HTTP 200', [
+                    'duration_ms' => (int) ((microtime(true) - $startTs) * 1000),
+                    'attempts'    => $attempt,
+                ]);
                 break;
             }
 
             // 429 + 5xx = retry-worthy
             if ($code === 429 || $code >= 500) {
-                error_log("[newss] anthropic HTTP {$code} (try {$attempt}): " . substr($raw, 0, 300));
+                Logger::warn("anthropic: HTTP {$code} retry {$attempt}", ['body' => substr($raw, 0, 200)]);
                 if ($attempt >= $maxAttempts) {
                     throw new \RuntimeException("Anthropic HTTP {$code} after {$maxAttempts} attempts; will retry via AS");
                 }
@@ -93,12 +102,13 @@ final class Anthropic
             }
 
             // Permanent 4xx = skip (no retry, return null)
-            error_log("[newss] anthropic HTTP {$code} (permanent): " . substr($raw, 0, 300));
+            Logger::error("anthropic: HTTP {$code} permanent", ['body' => substr($raw, 0, 300)]);
             return null;
         }
 
         $data = json_decode($raw, true);
         if (!is_array($data)) {
+            Logger::error('anthropic: response not JSON');
             return null;
         }
         foreach (($data['content'] ?? []) as $block) {
@@ -107,6 +117,7 @@ final class Anthropic
                 return is_array($input) ? $input : null;
             }
         }
+        Logger::error('anthropic: no publish_article tool_use in response');
         return null;
     }
 

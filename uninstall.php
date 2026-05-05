@@ -36,6 +36,8 @@ $options = [
     'newss_last_poll',
     'newss_last_cron_run',
     'newss_poll_progress',
+    'newss_log_buffer',
+    'newss_log_enabled',
     'newss_db_version',
 ];
 foreach ($options as $opt) {

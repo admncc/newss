@@ -19,6 +19,7 @@ final class Settings
     private const SLUG_TRANSCRIPT  = 'newss-transcript';
     private const SLUG_PUBLISHING  = 'newss-publishing';
     private const SLUG_HELP        = 'newss-help';
+    private const SLUG_LOG         = 'newss-log';
 
     public static function register(): void
     {
@@ -33,6 +34,69 @@ final class Settings
         add_action('wp_ajax_newss_pipeline_live', [self::class, 'handleAjaxPipelineLive']);
         add_action('admin_post_newss_cleanup_stuck', [self::class, 'handleCleanupStuck']);
         add_action('admin_post_newss_run_queue', [self::class, 'handleRunQueue']);
+        add_action('admin_post_newss_log_clear', [self::class, 'handleLogClear']);
+        add_action('admin_post_newss_log_toggle', [self::class, 'handleLogToggle']);
+        add_action('wp_ajax_newss_log_feed', [self::class, 'handleAjaxLogFeed']);
+
+        // Wenn Verbose-Logging an: jeden admin_post_newss_* Klick + jeden
+        // wp_ajax_newss_* Request automatisch loggen (vor dem Handler)
+        if ((int) get_option(Logger::OPTION_ENABLED, 0) === 1) {
+            self::registerVerboseHooks();
+        }
+    }
+
+    private static function registerVerboseHooks(): void
+    {
+        // Log jeden admin_post_newss_* Aufruf bei Plugin-Start vor dem Handler
+        add_action('admin_init', static function (): void {
+            if (!is_admin()) return;
+            $action = sanitize_key((string) ($_REQUEST['action'] ?? ''));
+            if ($action === '' || !str_starts_with($action, 'newss_')) return;
+            // Nur auf admin-post.php oder admin-ajax.php
+            $script = (string) ($_SERVER['SCRIPT_FILENAME'] ?? '');
+            if (!str_contains($script, 'admin-post.php') && !str_contains($script, 'admin-ajax.php')) return;
+            Logger::info('admin-action: ' . $action, [
+                'method' => (string) ($_SERVER['REQUEST_METHOD'] ?? ''),
+                'user'   => wp_get_current_user()->user_login ?? '?',
+                'ip'     => (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+            ]);
+        }, 1);
+    }
+
+    public static function handleLogToggle(): void
+    {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('newss_log_toggle');
+        $on = !empty($_POST['enable']) ? 1 : 0;
+        update_option(Logger::OPTION_ENABLED, $on, false);
+        Logger::warn('verbose logging ' . ($on ? 'ENABLED' : 'disabled') . ' by ' . (wp_get_current_user()->user_login ?? '?'));
+        wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_LOG));
+        exit;
+    }
+
+    public static function handleLogClear(): void
+    {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('newss_log_clear');
+        Logger::clear();
+        Logger::warn('log cleared by ' . (wp_get_current_user()->user_login ?? '?'));
+        wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_LOG));
+        exit;
+    }
+
+    public static function handleAjaxLogFeed(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Forbidden'], 403);
+        }
+        $entries = Logger::all();
+        // Nur die letzten 200 schicken um Bandbreite zu schonen
+        $entries = array_slice($entries, -200);
+        wp_send_json([
+            'enabled' => (int) get_option(Logger::OPTION_ENABLED, 0) === 1,
+            'total'   => count(Logger::all()),
+            'entries' => $entries,
+        ]);
     }
 
     public static function handleRunQueue(): void
@@ -647,6 +711,7 @@ final class Settings
         add_submenu_page(self::SLUG_STATUS, 'Newss · Claude',          'Claude',           'manage_options', self::SLUG_CLAUDE,     [self::class, 'renderClaudePage']);
         add_submenu_page(self::SLUG_STATUS, 'Newss · Veröffentlichung','Veröffentlichung', 'manage_options', self::SLUG_PUBLISHING, [self::class, 'renderPublishingPage']);
         add_submenu_page(self::SLUG_STATUS, 'Newss · Hilfe',           'Hilfe',            'manage_options', self::SLUG_HELP,       [self::class, 'renderHelpPage']);
+        add_submenu_page(self::SLUG_STATUS, 'Newss · Log',             'Log',              'manage_options', self::SLUG_LOG,        [self::class, 'renderLogPage']);
     }
 
     public static function registerSettings(): void
@@ -738,7 +803,7 @@ final class Settings
             wp_die('Forbidden');
         }
         check_admin_referer('newss_run_now');
-        error_log('[newss] handleRunNow: enter');
+        Logger::info('handleRunNow: enter');
 
         // Stale-Mutex-Cleanup: wenn ein vorheriger Run abgestuerzt ist
         // (PHP-Timeout, Worker-Kill etc.), bleibt newss_poll_running stehen
@@ -1486,6 +1551,134 @@ final class Settings
             </ul>
         </div>
         <?php
+    }
+
+    public static function renderLogPage(): void
+    {
+        if (!current_user_can('manage_options')) return;
+        $enabled = (int) get_option(Logger::OPTION_ENABLED, 0) === 1;
+        $entries = Logger::all();
+        $total = count($entries);
+        $shown = array_slice($entries, -200);
+        $ajaxUrl = admin_url('admin-ajax.php?action=newss_log_feed');
+        $toggleUrl = admin_url('admin-post.php');
+        ?>
+        <div class="wrap">
+            <h1>Newss · Log</h1>
+
+            <p style="max-width:880px">
+                Diagnose-Log: jeder Plugin-Vorgang (Worker-Schritte, Channel-Polls,
+                API-Calls, Klicks auf Admin-Buttons) wird hier gesammelt.
+                Errors/Warnings werden immer geloggt — Info-Level nur wenn
+                <strong>Verbose-Logging</strong> an ist. Bei Problemen kannst Du
+                den Log-Block unten kopieren und mir schicken.
+            </p>
+
+            <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:16px 0;padding:12px 16px;background:<?php echo $enabled ? '#eaf7e6' : '#f6f7f7'; ?>;border:1px solid #dcdcde;border-left:4px solid <?php echo $enabled ? '#0a7' : '#999'; ?>;max-width:880px">
+                <strong>Verbose-Logging:</strong>
+                <span style="color:<?php echo $enabled ? '#0a5a00' : '#666'; ?>;font-weight:600">
+                    <?php echo $enabled ? '● AN — alle Vorgaenge werden geloggt' : '○ AUS — nur Errors/Warnings'; ?>
+                </span>
+                <form method="post" action="<?php echo esc_url($toggleUrl); ?>" style="margin:0">
+                    <input type="hidden" name="action" value="newss_log_toggle">
+                    <input type="hidden" name="enable" value="<?php echo $enabled ? '0' : '1'; ?>">
+                    <?php wp_nonce_field('newss_log_toggle'); ?>
+                    <button type="submit" class="button button-primary"><?php echo $enabled ? 'Verbose ausschalten' : 'Verbose einschalten'; ?></button>
+                </form>
+                <form method="post" action="<?php echo esc_url($toggleUrl); ?>" style="margin:0"
+                      onsubmit="return confirm('Log-Buffer leeren?');">
+                    <input type="hidden" name="action" value="newss_log_clear">
+                    <?php wp_nonce_field('newss_log_clear'); ?>
+                    <button type="submit" class="button">Log leeren</button>
+                </form>
+                <button type="button" class="button" id="newss-log-copy">Log kopieren</button>
+            </div>
+
+            <p style="margin:0 0 6px 0;color:#666;font-size:12px">
+                <?php echo (int) $total; ?> Eintraege im Buffer (max <?php echo Logger::MAX_ENTRIES; ?>) — zeige letzte <?php echo count($shown); ?>.
+                <span id="newss-log-status" style="margin-left:12px;color:#0a7"></span>
+            </p>
+
+            <pre id="newss-log-output" style="background:#1d1f21;color:#c5c8c6;padding:14px;font-size:11px;line-height:1.45;max-height:600px;overflow:auto;border-radius:4px;font-family:Menlo,monospace;white-space:pre-wrap;word-break:break-word"><?php echo esc_html(self::formatLogEntries($shown)); ?></pre>
+
+            <script>
+            (function(){
+                var out  = document.getElementById('newss-log-output');
+                var stat = document.getElementById('newss-log-status');
+                var copy = document.getElementById('newss-log-copy');
+                var ajaxUrl = <?php echo wp_json_encode($ajaxUrl); ?>;
+
+                function fmt(entries){
+                    return entries.map(function(e){
+                        var d = new Date(Math.floor(e.ts * 1000));
+                        var pad = function(n){ return n < 10 ? '0' + n : '' + n; };
+                        var t = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+                        var ctx = e.context ? ' ' + JSON.stringify(e.context) : '';
+                        return '[' + t + '] ' + (e.level || 'info').toUpperCase().padEnd(5) + ' ' + e.message + ctx;
+                    }).join('\n');
+                }
+
+                function tick(){
+                    fetch(ajaxUrl, {credentials:'same-origin', cache:'no-store'})
+                        .then(function(r){ return r.ok ? r.json() : null; })
+                        .then(function(d){
+                            if (!d) return;
+                            out.textContent = fmt(d.entries || []);
+                            // Auto-scroll wenn user nicht hochgescrollt hat
+                            if (out.scrollTop + out.clientHeight + 20 >= out.scrollHeight) {
+                                out.scrollTop = out.scrollHeight;
+                            }
+                            stat.textContent = '· live · ' + (d.enabled ? 'verbose' : 'errors-only');
+                        })
+                        .catch(function(){});
+                }
+
+                copy.addEventListener('click', function(){
+                    var text = out.textContent || '';
+                    navigator.clipboard.writeText(text).then(function(){
+                        stat.textContent = '· kopiert (' + text.length + ' chars)';
+                        setTimeout(function(){ stat.textContent = ''; }, 3000);
+                    }).catch(function(){
+                        // Fallback
+                        var ta = document.createElement('textarea');
+                        ta.value = text; document.body.appendChild(ta); ta.select();
+                        try { document.execCommand('copy'); } catch(e){}
+                        ta.remove();
+                        stat.textContent = '· kopiert (legacy)';
+                    });
+                });
+
+                // Auto-Refresh alle 5s
+                tick();
+                var timer = setInterval(tick, 5000);
+                setTimeout(function(){ clearInterval(timer); stat.textContent = '· auto-stop nach 30 Min'; }, 30 * 60 * 1000);
+
+                out.scrollTop = out.scrollHeight;
+            })();
+            </script>
+        </div>
+        <?php
+    }
+
+    /**
+     * @param array<int,array{ts:float,level:string,message:string,context:?array}> $entries
+     */
+    private static function formatLogEntries(array $entries): string
+    {
+        $lines = [];
+        foreach ($entries as $e) {
+            $ts = (float) ($e['ts'] ?? 0);
+            $when = wp_date('H:i:s', (int) $ts) . '.' . str_pad((string) ((int) (($ts - floor($ts)) * 1000)), 3, '0', STR_PAD_LEFT);
+            $level = strtoupper((string) ($e['level'] ?? 'info'));
+            $msg = (string) ($e['message'] ?? '');
+            $ctx = $e['context'] ?? null;
+            $line = "[{$when}] " . str_pad($level, 5) . ' ' . $msg;
+            if ($ctx) {
+                $line .= ' ' . wp_json_encode($ctx, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            }
+            $lines[] = $line;
+        }
+        return implode("\n", $lines);
     }
 
     // ─────────────────────────────────────────────────────────────────────

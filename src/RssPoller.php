@@ -25,7 +25,7 @@ final class RssPoller
             error_log('[newss] pollAll abort: another run in progress (mutex transient set)');
             return;
         }
-        error_log('[newss] pollAll: starting with ' . count($enabled) . ' channels');
+        Logger::info('poll: starting ' . count($enabled) . ' channels');
 
         // Auto-Cleanup von Stuck-Jobs (>10 Min. in-progress) -- belt-and-
         // suspenders falls der action_scheduler_before_process_queue-Hook
@@ -72,10 +72,11 @@ final class RssPoller
                     $entry['count'] = self::pollChannel($channel);
                     $entry['ok']    = true;
                     $stats['new'] += $entry['count'];
+                    Logger::info('poll: ' . $entry['name'] . ' ok (+' . $entry['count'] . ' videos)');
                 } catch (\Throwable $e) {
                     $entry['error'] = $e->getMessage();
                     $stats['errors']++;
-                    error_log('[newss] poll error for ' . $entry['id'] . ': ' . $e->getMessage());
+                    Logger::error('poll: ' . $entry['name'] . ' fail: ' . $e->getMessage());
                 }
                 $perChannel[] = $entry;
                 self::updateProgress($stats['channels'], '', $perChannel);
@@ -86,6 +87,7 @@ final class RssPoller
                 'stats'    => $stats,
                 'channels' => $perChannel,
             ], false);
+            Logger::info('poll: completed (channels=' . $stats['channels'] . ', new=' . $stats['new'] . ', errors=' . $stats['errors'] . ')');
         } finally {
             delete_option('newss_poll_progress');
             delete_transient('newss_poll_running');

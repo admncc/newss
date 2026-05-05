@@ -36,6 +36,8 @@ final class Transcript
     {
         $this->lastProvider = '';
         $this->attemptLog = [];
+        $startTs = microtime(true);
+        Logger::info('transcript: fetch start ' . $videoId);
 
         $supadataKey = (string) get_option('newss_supadata_api_key', '');
         if ($supadataKey !== '') {
@@ -46,10 +48,11 @@ final class Transcript
                 $text = $this->fetchSupadata($videoId, $supadataKey);
                 if ($text !== '') {
                     $this->lastProvider = 'supadata';
+                    Logger::info('transcript: supadata ok ' . mb_strlen($text) . ' chars', ['duration_ms' => (int) ((microtime(true) - $startTs) * 1000)]);
                     return $text;
                 }
             } catch (\Throwable $e) {
-                error_log('[newss] supadata fail, fallback: ' . $e->getMessage());
+                Logger::warn('transcript: supadata exception ' . $e->getMessage());
                 $this->recordAttempt('supadata', false, 'exception: ' . $e->getMessage());
             }
         } else {
@@ -59,17 +62,20 @@ final class Transcript
         $text = $this->fetchYtDlp($videoId);
         if ($text !== '') {
             $this->lastProvider = 'yt-dlp';
+            Logger::info('transcript: yt-dlp ok ' . mb_strlen($text) . ' chars', ['duration_ms' => (int) ((microtime(true) - $startTs) * 1000)]);
             return $text;
         }
         if ((bool) get_option('newss_whisper_enabled', false)) {
             $text = $this->fetchWhisper($videoId);
             if ($text !== '') {
                 $this->lastProvider = 'whisper';
+                Logger::info('transcript: whisper ok ' . mb_strlen($text) . ' chars', ['duration_ms' => (int) ((microtime(true) - $startTs) * 1000)]);
                 return $text;
             }
         } else {
             $this->recordAttempt('whisper', false, 'deaktiviert');
         }
+        Logger::warn('transcript: empty (alle Provider fehlgeschlagen)', ['attempts' => $this->attemptLog]);
         return '';
     }
 

@@ -47,6 +47,11 @@ final class Worker
     public static function processVideo(array $payload): void
     {
         $videoId = (string) ($payload['video_id'] ?? '');
+        Logger::info('worker: start video=' . $videoId, [
+            'attempt' => (int) ($payload['attempt'] ?? 1),
+            'channel' => (string) ($payload['channel_name'] ?? ''),
+            'title'   => mb_substr((string) ($payload['video_title'] ?? ''), 0, 60),
+        ]);
         if ($videoId === '') {
             self::skip('empty payload', '');
             return;
@@ -136,6 +141,10 @@ final class Worker
             $postId = (new PostBuilder())->createPost($rewrite, $payload, $forceDraft);
             delete_transient(self::pendingTransientKey($videoId));
             self::log('posted post #' . $postId);
+            Logger::info('worker: posted #' . $postId . ' video=' . $videoId, [
+                'draft'   => $forceDraft,
+                'channel' => (string) ($payload['channel_name'] ?? ''),
+            ]);
         } finally {
             delete_option($lockKey);
             delete_transient(Status::STATUS_COUNTS_CACHE_KEY);
@@ -345,9 +354,7 @@ final class Worker
 
     private static function skip(string $reason, string $videoId): void
     {
-        if ($videoId !== '') {
-            error_log("[newss] skip {$videoId}: {$reason}");
-        }
+        Logger::warn('worker: skip ' . ($videoId !== '' ? $videoId . ' ' : '') . $reason);
         self::log('SKIP: ' . $reason);
     }
 
