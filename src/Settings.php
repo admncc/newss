@@ -694,7 +694,7 @@ final class Settings
             'newss_youtube_api_key' => 'sanitize_text_field',
             'newss_youtube_method'  => [self::class, 'sanitizeYoutubeMethod'],
             'newss_youtube_proxy'   => [self::class, 'sanitizeMultiline'],
-            'newss_youtube_cookie'  => 'sanitize_text_field',
+            'newss_youtube_cookie'  => [self::class, 'sanitizeCookies'],
         ];
         foreach ($youtubeOpts as $opt => $cb) {
             register_setting(self::GROUP_YOUTUBE, $opt, [
@@ -738,6 +738,16 @@ final class Settings
     public static function sanitizeMultiline($value): string     { return wp_kses_post((string) $value); }
     public static function sanitizeStatus($value): string        { return in_array($value, ['publish', 'draft'], true) ? $value : 'publish'; }
     public static function sanitizeYoutubeMethod($value): string { return in_array($value, ['api', 'rss'], true) ? $value : 'rss'; }
+    public static function sanitizeCookies($value): string
+    {
+        // Cookies koennen Header-String (1 Zeile) ODER Netscape-File (multiline)
+        // sein. Wir erlauben Zeilenumbrueche, strippen aber HTML-Tags und
+        // unsichtbare Steuerzeichen ausser Tab + Newline.
+        $value = (string) $value;
+        $value = preg_replace('/[^\P{C}\t\n]/u', '', $value);
+        $value = wp_check_invalid_utf8($value);
+        return trim((string) $value);
+    }
     public static function sanitizeBlockedAction($value): string { return in_array($value, ['skip', 'draft'], true) ? $value : 'skip'; }
     public static function sanitizeBlockedTopics($value): array
     {
@@ -1208,12 +1218,14 @@ final class Settings
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="newss_youtube_cookie">Consent-Cookie</label></th>
+                        <th scope="row"><label for="newss_youtube_cookie">YouTube-Cookies</label></th>
                         <td>
-                            <input type="text" id="newss_youtube_cookie" name="newss_youtube_cookie" value="<?php echo esc_attr((string) get_option('newss_youtube_cookie', \Newss\Http::DEFAULT_YT_COOKIE)); ?>" class="large-text code" placeholder="<?php echo esc_attr(\Newss\Http::DEFAULT_YT_COOKIE); ?>">
+                            <textarea id="newss_youtube_cookie" name="newss_youtube_cookie" rows="8" class="large-text code" placeholder="<?php echo esc_attr(\Newss\Http::DEFAULT_YT_COOKIE); ?>"><?php echo esc_textarea((string) get_option('newss_youtube_cookie', \Newss\Http::DEFAULT_YT_COOKIE)); ?></textarea>
                             <p class="description">
-                                Wird bei DE-/EU-IPs gebraucht damit YouTube nicht die Consent-Wall serviert.
-                                Reicht meist gegen Consent-Wall, <em>nicht</em> gegen Bot-Detection — dafür braucht's einen Proxy.
+                                Akzeptiert <strong>zwei Formate</strong>:<br>
+                                &nbsp;&nbsp;1. <strong>Header-String</strong>: <code>KEY=VAL; KEY2=VAL2</code> (z. B. der Default-Consent-Cookie)<br>
+                                &nbsp;&nbsp;2. <strong>Netscape-Cookies-File</strong> (Browser-Export, beginnt mit <code># Netscape HTTP Cookie File</code>) — fuer authentifizierte Logged-in-Sessions, hilft gegen YouTube-Bot-Detection.<br>
+                                Browser-Export via Extension wie „Get cookies.txt LOCALLY" → bei <code>youtube.com</code> exportieren → komplett hier reinpasten.
                                 Leer = kein Cookie senden.
                             </p>
                         </td>

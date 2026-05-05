@@ -367,10 +367,15 @@ final class Transcript
     /**
      * Schreibt das newss_youtube_cookie-Setting als Netscape-Cookies-File
      * in den tmpDir und liefert ' --cookies <escaped-path>' (mit Leerzeichen
-     * davor). Format-Konvertierung: 'KEY=VAL; KEY2=VAL2' -> Netscape-Format.
-     * Gibt '' zurueck wenn kein Cookie konfiguriert oder Schreiben fehlschlaegt.
+     * davor). Liefert '' bei leerem Setting / Schreibfehler.
      *
-     * Datei wird automatisch via cleanup($tmpDir) am Ende mit aufgeraeumt.
+     * Akzeptiert ZWEI Eingabe-Formate:
+     * 1. Bereits Netscape-formatiert (Browser-Export, beginnt typisch mit
+     *    '# Netscape' oder enthaelt Tab-separierte Zeilen) -> 1:1 schreiben
+     * 2. Simple HTTP-Cookie-Header 'KEY=VAL; KEY2=VAL2' -> in Netscape-Format
+     *    konvertieren
+     *
+     * Datei wird via cleanup($tmpDir) am Ende automatisch entfernt.
      */
     private static function cookiesArg(string $tmpDir): string
     {
@@ -382,36 +387,53 @@ final class Transcript
             return '';
         }
 
-        // Pairs aus 'KEY=VAL; KEY2=VAL2' parsen
-        $lines = ["# Netscape HTTP Cookie File"];
-        foreach (preg_split('/;\s*/', $raw) as $pair) {
-            $pair = trim($pair);
-            if ($pair === '' || !str_contains($pair, '=')) {
-                continue;
+        $content = '';
+        if (self::looksLikeNetscapeFile($raw)) {
+            // Schon Netscape-Format -- 1:1 schreiben (Browser-Export-Friendly)
+            $content = rtrim($raw) . "\n";
+        } else {
+            // Simple 'KEY=VAL; KEY2=VAL2' -> Netscape konvertieren
+            $lines = ["# Netscape HTTP Cookie File"];
+            foreach (preg_split('/;\s*/', $raw) as $pair) {
+                $pair = trim($pair);
+                if ($pair === '' || !str_contains($pair, '=')) {
+                    continue;
+                }
+                [$name, $value] = array_map('trim', explode('=', $pair, 2));
+                if ($name === '') continue;
+                $lines[] = implode("\t", [
+                    '.youtube.com', 'TRUE', '/', 'FALSE', '0', $name, $value,
+                ]);
             }
-            [$name, $value] = array_map('trim', explode('=', $pair, 2));
-            if ($name === '') continue;
-            // domain  flag  path  secure  expiration  name  value
-            // (TAB-separiert)
-            $lines[] = implode("\t", [
-                '.youtube.com',
-                'TRUE',
-                '/',
-                'FALSE',
-                '0',
-                $name,
-                $value,
-            ]);
-        }
-        if (count($lines) <= 1) {
-            return '';
+            if (count($lines) <= 1) {
+                return '';
+            }
+            $content = implode("\n", $lines) . "\n";
         }
 
         $path = $tmpDir . '/yt_cookies.txt';
-        if (@file_put_contents($path, implode("\n", $lines) . "\n") === false) {
+        if (@file_put_contents($path, $content) === false) {
             return '';
         }
         return ' --cookies ' . escapeshellarg($path);
+    }
+
+    private static function looksLikeNetscapeFile(string $raw): bool
+    {
+        // Erkennungsheuristik: Header-Kommentar oder mind. eine Zeile mit
+        // genau 7 tab-separierten Feldern (domain, flag, path, secure,
+        // expiration, name, value)
+        if (str_contains($raw, '# Netscape HTTP Cookie File')) {
+            return true;
+        }
+        foreach (preg_split('/\R/', $raw) as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) continue;
+            if (substr_count($line, "\t") === 6) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function cleanup(string $dir): void

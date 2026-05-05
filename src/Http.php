@@ -53,15 +53,49 @@ final class Http
         if (!preg_match('#^https?://(?:[a-z0-9-]+\.)?youtube(?:-nocookie)?\.com/#i', $url)) {
             return $args;
         }
-        $cookie = trim((string) get_option('newss_youtube_cookie', self::DEFAULT_YT_COOKIE));
-        if ($cookie === '') {
+        $cookieHeader = self::buildCookieHeader();
+        if ($cookieHeader === '') {
             return $args;
         }
         $args['headers'] = ($args['headers'] ?? []);
         if (empty($args['headers']['Cookie']) && empty($args['headers']['cookie'])) {
-            $args['headers']['Cookie'] = $cookie;
+            $args['headers']['Cookie'] = $cookieHeader;
         }
         return $args;
+    }
+
+    /**
+     * Liefert den Cookie-Header-Wert (KEY=VAL; KEY2=VAL2). Akzeptiert beide
+     * Eingabe-Formate aus newss_youtube_cookie:
+     * - Netscape-Cookies-File (Browser-Export) -> name/value-Spalten extrahieren
+     * - Simple HTTP-Header-String -> 1:1 zurueckgeben
+     */
+    private static function buildCookieHeader(): string
+    {
+        $raw = trim((string) get_option('newss_youtube_cookie', self::DEFAULT_YT_COOKIE));
+        if ($raw === '') {
+            return '';
+        }
+        // Header-String erkennen (kein '#'-Header, keine TAB-Zeilen)
+        $isNetscape = str_contains($raw, '# Netscape HTTP Cookie File')
+            || preg_match('/^[^\t#\n]+\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]+\t/m', $raw) === 1;
+        if (!$isNetscape) {
+            return $raw;
+        }
+
+        $pairs = [];
+        foreach (preg_split('/\R/', $raw) as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) continue;
+            $cols = explode("\t", $line);
+            if (count($cols) < 7) continue;
+            $name  = trim($cols[5]);
+            $value = trim($cols[6]);
+            if ($name !== '') {
+                $pairs[] = $name . '=' . $value;
+            }
+        }
+        return implode('; ', $pairs);
     }
 
     /**
