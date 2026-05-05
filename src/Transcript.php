@@ -153,9 +153,10 @@ final class Transcript
         $url = 'https://www.youtube.com/watch?v=' . $videoId;
 
         $cmd = sprintf(
-            '%s%s --skip-download --write-auto-subs --write-subs --sub-langs %s --sub-format %s --convert-subs srt -o %s %s 2>&1',
+            '%s%s%s --skip-download --write-auto-subs --write-subs --sub-langs %s --sub-format %s --convert-subs srt -o %s %s 2>&1',
             escapeshellarg($bin),
             self::proxyArg(),
+            self::cookiesArg($tmpDir),
             escapeshellarg('de.*,de,en.*,en'),
             escapeshellarg('vtt/srt/best'),
             escapeshellarg($tmpDir . '/sub'),
@@ -226,9 +227,10 @@ final class Transcript
         // bevor wir das Limit reissen. ffmpeg-postprocessor-args konvertiert
         // direkt nach dem yt-dlp-Audio-Extract.
         $cmd = sprintf(
-            '%s%s -x --audio-format mp3 --postprocessor-args %s -o %s %s 2>&1',
+            '%s%s%s -x --audio-format mp3 --postprocessor-args %s -o %s %s 2>&1',
             escapeshellarg($bin),
             self::proxyArg(),
+            self::cookiesArg($tmpDir),
             escapeshellarg('ffmpeg:-ar 16000 -ac 1 -b:a 32k'),
             escapeshellarg($tmpDir . '/audio.%(ext)s'),
             escapeshellarg($url)
@@ -360,6 +362,56 @@ final class Transcript
             return '';
         }
         return ' --proxy ' . escapeshellarg($proxy);
+    }
+
+    /**
+     * Schreibt das newss_youtube_cookie-Setting als Netscape-Cookies-File
+     * in den tmpDir und liefert ' --cookies <escaped-path>' (mit Leerzeichen
+     * davor). Format-Konvertierung: 'KEY=VAL; KEY2=VAL2' -> Netscape-Format.
+     * Gibt '' zurueck wenn kein Cookie konfiguriert oder Schreiben fehlschlaegt.
+     *
+     * Datei wird automatisch via cleanup($tmpDir) am Ende mit aufgeraeumt.
+     */
+    private static function cookiesArg(string $tmpDir): string
+    {
+        if ($tmpDir === '' || !is_dir($tmpDir)) {
+            return '';
+        }
+        $raw = trim((string) get_option('newss_youtube_cookie', ''));
+        if ($raw === '') {
+            return '';
+        }
+
+        // Pairs aus 'KEY=VAL; KEY2=VAL2' parsen
+        $lines = ["# Netscape HTTP Cookie File"];
+        foreach (preg_split('/;\s*/', $raw) as $pair) {
+            $pair = trim($pair);
+            if ($pair === '' || !str_contains($pair, '=')) {
+                continue;
+            }
+            [$name, $value] = array_map('trim', explode('=', $pair, 2));
+            if ($name === '') continue;
+            // domain  flag  path  secure  expiration  name  value
+            // (TAB-separiert)
+            $lines[] = implode("\t", [
+                '.youtube.com',
+                'TRUE',
+                '/',
+                'FALSE',
+                '0',
+                $name,
+                $value,
+            ]);
+        }
+        if (count($lines) <= 1) {
+            return '';
+        }
+
+        $path = $tmpDir . '/yt_cookies.txt';
+        if (@file_put_contents($path, implode("\n", $lines) . "\n") === false) {
+            return '';
+        }
+        return ' --cookies ' . escapeshellarg($path);
     }
 
     private function cleanup(string $dir): void

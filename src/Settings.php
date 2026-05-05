@@ -1189,40 +1189,45 @@ final class Settings
                     </table>
                 </div>
 
-                <div id="newss-yt-rss-section">
-                    <h3 style="margin:18px 0 6px">RSS-Feed mit Proxy-Rotation</h3>
-                    <table class="form-table" role="presentation">
-                        <tr>
-                            <th scope="row"><label for="newss_youtube_proxy">Proxy-Liste</label></th>
-                            <td>
-                                <textarea id="newss_youtube_proxy" name="newss_youtube_proxy" rows="6" class="large-text code" placeholder="host:port:user:pass&#10;http://user:pass@host:port&#10;socks5://host:port"><?php echo esc_textarea($youtubeProxy); ?></textarea>
-                                <p class="description">
-                                    Eine Zeile pro Proxy. Akzeptierte Formate:<br>
-                                    <code>host:port:user:pass</code> &nbsp;|&nbsp; <code>http://user:pass@host:port</code> &nbsp;|&nbsp; <code>socks5://host:port</code>
-                                </p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row"><label for="newss_youtube_cookie">Consent-Cookie</label></th>
-                            <td>
-                                <input type="text" id="newss_youtube_cookie" name="newss_youtube_cookie" value="<?php echo esc_attr((string) get_option('newss_youtube_cookie', \Newss\Http::DEFAULT_YT_COOKIE)); ?>" class="large-text code" placeholder="<?php echo esc_attr(\Newss\Http::DEFAULT_YT_COOKIE); ?>">
-                                <p class="description">Wird bei DE-/EU-IPs gebraucht damit YouTube nicht die Consent-Wall serviert. Leer = kein Cookie senden.</p>
-                            </td>
-                        </tr>
-                    </table>
-                </div>
+                <h3 style="margin:24px 0 6px">Proxy &amp; Cookies</h3>
+                <p class="description" style="max-width:780px;margin:0 0 8px 0">
+                    Wird verwendet für <strong>yt-dlp</strong> (Caption-Fetch + Whisper-Audio-Download)
+                    und bei Channel-Polling-Methode = RSS auch für den RSS-Feed.
+                    Bei reinem API-Polling wäre Proxy nur für die Transcript-Pfade nötig — empfohlen
+                    wenn YouTube Bot-Blocks (HTTP 403, „Sign in to confirm…") wirft.
+                </p>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><label for="newss_youtube_proxy">Proxy-Liste</label></th>
+                        <td>
+                            <textarea id="newss_youtube_proxy" name="newss_youtube_proxy" rows="6" class="large-text code" placeholder="host:port:user:pass&#10;http://user:pass@host:port&#10;socks5://host:port"><?php echo esc_textarea($youtubeProxy); ?></textarea>
+                            <p class="description">
+                                Eine Zeile pro Proxy (Random-Pick pro Request). Formate:<br>
+                                <code>host:port:user:pass</code> &nbsp;|&nbsp; <code>http://user:pass@host:port</code> &nbsp;|&nbsp; <code>socks5://host:port</code>
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="newss_youtube_cookie">Consent-Cookie</label></th>
+                        <td>
+                            <input type="text" id="newss_youtube_cookie" name="newss_youtube_cookie" value="<?php echo esc_attr((string) get_option('newss_youtube_cookie', \Newss\Http::DEFAULT_YT_COOKIE)); ?>" class="large-text code" placeholder="<?php echo esc_attr(\Newss\Http::DEFAULT_YT_COOKIE); ?>">
+                            <p class="description">
+                                Wird bei DE-/EU-IPs gebraucht damit YouTube nicht die Consent-Wall serviert.
+                                Reicht meist gegen Consent-Wall, <em>nicht</em> gegen Bot-Detection — dafür braucht's einen Proxy.
+                                Leer = kein Cookie senden.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
 
                 <script>
                 function newssToggleYtMethod() {
                     var m = document.querySelector('input[name="newss_youtube_method"]:checked');
                     if (!m) return;
                     var api = document.getElementById('newss-yt-api-section');
-                    var rss = document.getElementById('newss-yt-rss-section');
                     var apiActive = m.value === 'api';
                     api.style.opacity = apiActive ? '1' : '0.4';
                     api.style.pointerEvents = apiActive ? 'auto' : 'none';
-                    rss.style.opacity = apiActive ? '0.4' : '1';
-                    rss.style.pointerEvents = apiActive ? 'none' : 'auto';
                 }
                 document.addEventListener('DOMContentLoaded', newssToggleYtMethod);
                 </script>
