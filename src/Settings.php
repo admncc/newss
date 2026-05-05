@@ -106,98 +106,49 @@ final class Settings
         }
         check_admin_referer('newss_run_queue');
 
-        @ignore_user_abort(true);
-        @set_time_limit(180);
-
-        // Synchron laufen lassen + Ergebnis in Notice schreiben, damit der
-        // User sieht was tatsaechlich passiert. Limit 3 Jobs/Klick um
-        // Browser-Timeout (typisch 60-120s) zu vermeiden.
-        $diag = self::runAsQueueWithDiag(3);
-
-        set_transient('newss_pipeline_notice', [
-            'type'    => $diag['type'],
-            'message' => $diag['message'],
-        ], 60);
-        wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_PIPELINE));
-        exit;
-    }
-
-    /**
-     * Wie runAsQueue, aber sammelt Diagnose-String fuer den User.
-     *
-     * @return array{type:string, message:string}
-     */
-    private static function runAsQueueWithDiag(int $maxDirectJobs): array
-    {
+        // Pre-Run-Diagnose nur fuer User-Notice (counts vor dem Detach)
         global $wpdb;
-        $msg = [];
-
-        if (!class_exists('\\ActionScheduler')) {
-            return ['type' => 'error', 'message' => 'ActionScheduler-Klasse nicht geladen — vendor/-Verzeichnis pruefen.'];
-        }
-
-        // Stale Locks/Claims aufraeumen
-        delete_transient('action_scheduler_lock_runner');
-        delete_transient('action_scheduler_lock_async-request-runner');
-        delete_option('action_scheduler_lock_runner');
-        delete_option('action_scheduler_lock_async-request-runner');
-
-        $claimsTable  = $wpdb->prefix . 'actionscheduler_claims';
         $actionsTable = $wpdb->prefix . 'actionscheduler_actions';
-        $cutoff = gmdate('Y-m-d H:i:s', time() - 5 * MINUTE_IN_SECONDS);
-
-        $staleClaims = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$claimsTable} WHERE date_created_gmt < %s",
-            $cutoff
-        ));
-        if ($staleClaims > 0) {
-            $wpdb->query($wpdb->prepare(
-                "UPDATE {$actionsTable} a INNER JOIN {$claimsTable} c ON a.claim_id = c.claim_id
-                 SET a.claim_id = 0 WHERE c.date_created_gmt < %s",
-                $cutoff
-            ));
-            $wpdb->query($wpdb->prepare("DELETE FROM {$claimsTable} WHERE date_created_gmt < %s", $cutoff));
-            $msg[] = "{$staleClaims} stale Claims aufgeraeumt";
-        }
-        $orphaned = (int) $wpdb->query(
-            "UPDATE {$actionsTable} a LEFT JOIN {$claimsTable} c ON a.claim_id = c.claim_id
-             SET a.claim_id = 0 WHERE a.claim_id <> 0 AND c.claim_id IS NULL"
-        );
-        if ($orphaned > 0) {
-            $msg[] = "{$orphaned} orphan-Claim-Refs gecleart";
-        }
-
         $duePending = (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM {$actionsTable}
-             WHERE hook = %s AND status = %s AND scheduled_date_gmt <= %s AND claim_id = 0",
+             WHERE hook = %s AND status = %s
+               AND scheduled_date_gmt <= %s AND claim_id = 0",
             Worker::HOOK_PROCESS,
             'pending',
             gmdate('Y-m-d H:i:s')
         ));
-        $msg[] = "{$duePending} due+unclaimed Pending-Jobs vor Run";
 
-        // AS-Runner versuchen
-        $asProcessed = 0;
-        try {
-            $asProcessed = (int) \ActionScheduler::runner()->run('Newss-Manual');
-            $msg[] = "AS-Runner verarbeitete {$asProcessed} Jobs";
-        } catch (\Throwable $e) {
-            $msg[] = 'AS-Runner Exception: ' . $e->getMessage();
-            error_log('[newss] runAsQueueWithDiag AS exception: ' . $e->getMessage());
+        set_transient('newss_pipeline_notice', [
+            'type'    => 'success',
+            'message' => sprintf(
+                'Queue-Runner gestartet im Hintergrund — %d due+unclaimed Pending-Jobs werden abgearbeitet. Live-Box oben aktualisiert sich alle 10s.',
+                $duePending
+            ),
+        ], 60);
+
+        wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_PIPELINE));
+
+        // Browser-Antwort losschicken, dann im detached-Modus arbeiten ohne
+        // 180s-Browser-Timeout. ignore_user_abort + set_time_limit(0) damit
+        // der Runner bis zur natuerlichen Erschoepfung der Queue laeuft
+        // (oder bis AS-Runner-Time-Limit von 600s greift).
+        @ignore_user_abort(true);
+        @set_time_limit(0);
+        if (function_exists('fastcgi_finish_request')) {
+            @fastcgi_finish_request();
+        } else {
+            if (!headers_sent()) {
+                header('Connection: close');
+                header('Content-Length: 0');
+            }
+            while (ob_get_level() > 0) { @ob_end_flush(); }
+            @flush();
         }
 
-        // Wenn AS nichts gemacht hat: Direkt-Processor
-        $directProcessed = 0;
-        if ($asProcessed === 0 && $duePending > 0) {
-            $directProcessed = self::processPendingDirectly($maxDirectJobs);
-            $msg[] = "Direkt-Processor verarbeitete {$directProcessed} Jobs";
-        }
-
-        $type = ($asProcessed + $directProcessed) > 0 ? 'success' : ($duePending > 0 ? 'warning' : 'info');
-        return [
-            'type'    => $type,
-            'message' => 'Queue-Run: ' . implode(' · ', $msg),
-        ];
+        Logger::info('handleRunQueue: detached, starting AS-runner');
+        self::runAsQueue();
+        Logger::info('handleRunQueue: detached process finished');
+        exit;
     }
 
     /**
