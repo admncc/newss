@@ -109,20 +109,53 @@ final class Settings
         // Pre-Run-Diagnose nur fuer User-Notice (counts vor dem Detach)
         global $wpdb;
         $actionsTable = $wpdb->prefix . 'actionscheduler_actions';
+        $now = gmdate('Y-m-d H:i:s');
+
+        // Zaehle pending aufgesplittet: due (jetzt faellig) vs future-scheduled
         $duePending = (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM {$actionsTable}
              WHERE hook = %s AND status = %s
                AND scheduled_date_gmt <= %s AND claim_id = 0",
             Worker::HOOK_PROCESS,
             'pending',
-            gmdate('Y-m-d H:i:s')
+            $now
         ));
+        $futurePending = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$actionsTable}
+             WHERE hook = %s AND status = %s
+               AND scheduled_date_gmt > %s AND claim_id = 0",
+            Worker::HOOK_PROCESS,
+            'pending',
+            $now
+        ));
+
+        // Manueller Button = User will dass ALLES sofort laeuft, auch
+        // future-scheduled Retries. Pull-forward: scheduled_date_gmt = NOW.
+        // Damit werden Retry-Backoffs uebersprungen -- gewollt bei manuellem
+        // Klick, AS-Cron behandelt's regulaer.
+        $forwarded = 0;
+        if ($futurePending > 0) {
+            $forwarded = (int) $wpdb->query($wpdb->prepare(
+                "UPDATE {$actionsTable}
+                 SET scheduled_date_gmt = %s, scheduled_date_local = %s
+                 WHERE hook = %s AND status = %s
+                   AND scheduled_date_gmt > %s AND claim_id = 0",
+                $now,
+                wp_date('Y-m-d H:i:s'),
+                Worker::HOOK_PROCESS,
+                'pending',
+                $now
+            ));
+        }
+        $totalDue = $duePending + $forwarded;
 
         set_transient('newss_pipeline_notice', [
             'type'    => 'success',
             'message' => sprintf(
-                'Queue-Runner gestartet im Hintergrund — %d due+unclaimed Pending-Jobs werden abgearbeitet. Live-Box oben aktualisiert sich alle 10s.',
-                $duePending
+                'Queue-Runner gestartet im Hintergrund — %d Pending-Jobs werden abgearbeitet (%d sofort faellig%s). Live-Box oben aktualisiert sich alle 10s.',
+                $totalDue,
+                $duePending,
+                $forwarded > 0 ? sprintf(' + %d Retry-Schedules vorgezogen', $forwarded) : ''
             ),
         ], 60);
 
