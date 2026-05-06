@@ -104,7 +104,11 @@ final class Transcript
         }
         $code = (int) wp_remote_retrieve_response_code($resp);
         $body = (string) wp_remote_retrieve_body($resp);
-        if ($code !== 200) {
+        // 200 + 206 (Partial Content) als Erfolg behandeln -- Supadata
+        // liefert bei 206 den Transcript trotzdem im Body. 2xx ist die
+        // Richtige Erfolgs-Familie.
+        $is2xx = $code >= 200 && $code < 300;
+        if (!$is2xx) {
             error_log("[newss] supadata HTTP {$code}: " . substr($body, 0, 500));
             self::recordHealth('supadata', false, "HTTP {$code}");
             if ($code === 429 || $code >= 500) {
@@ -113,10 +117,10 @@ final class Transcript
             $this->recordAttempt('supadata', false, "HTTP {$code}");
             return '';
         }
-        self::recordHealth('supadata', true, '');
+        self::recordHealth('supadata', true, $code === 206 ? 'HTTP 206 partial' : '');
         $data = json_decode($body, true);
         if (!is_array($data)) {
-            $this->recordAttempt('supadata', false, 'HTTP 200, kein JSON');
+            $this->recordAttempt('supadata', false, "HTTP {$code}, kein JSON");
             return '';
         }
 
