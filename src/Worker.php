@@ -34,13 +34,18 @@ final class Worker
         }
         // Marker bevor cleanup laeuft, damit ein evtl. Fatal nicht in
         // Endlosschleife resultiert
-        set_transient('newss_auto_cleanup_ran', time(), 5 * MINUTE_IN_SECONDS);
+        set_transient('newss_auto_cleanup_ran', time(), 2 * MINUTE_IN_SECONDS);
+        Logger::info('auto-cleanup: starting (threshold=5min)');
         $result = self::cleanupStuckJobs(5 * MINUTE_IN_SECONDS);
-        if ($result['cleared'] > 0) {
-            error_log(sprintf(
-                '[newss] auto-cleanup: %d stuck-job(s) failed-marked',
-                $result['cleared']
+        if ($result['cleared'] > 0 || $result['poll_mutex'] || !empty($result['errors'])) {
+            Logger::warn(sprintf(
+                'auto-cleanup: %d stuck-job(s) failed-marked%s%s',
+                $result['cleared'],
+                $result['poll_mutex'] ? ' + poll-mutex cleared' : '',
+                !empty($result['errors']) ? ' + errors: ' . implode(' | ', $result['errors']) : ''
             ));
+        } else {
+            Logger::info('auto-cleanup: nothing to clean');
         }
     }
 

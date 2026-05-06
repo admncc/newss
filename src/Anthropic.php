@@ -62,7 +62,7 @@ final class Anthropic
         while (true) {
             $attempt++;
             $resp = wp_remote_post(self::API_URL, [
-                'timeout' => 120,
+                'timeout' => 60,
                 'headers' => [
                     'x-api-key'         => $apiKey,
                     'anthropic-version' => self::API_VERSION,
