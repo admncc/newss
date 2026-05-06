@@ -44,6 +44,17 @@ final class Worker
                 $result['poll_mutex'] ? ' + poll-mutex cleared' : '',
                 !empty($result['errors']) ? ' + errors: ' . implode(' | ', $result['errors']) : ''
             ));
+            // Wenn was freigegeben wurde: wp-cron sofort triggern damit die
+            // freigegebenen Slots nicht erst beim naechsten Plesk-Cron-Tick
+            // (5 Min) wieder aufgefuellt werden.
+            if ($result['cleared'] > 0) {
+                wp_remote_get(home_url('/wp-cron.php?doing_wp_cron=' . time()), [
+                    'timeout'   => 0.01,
+                    'blocking'  => false,
+                    'sslverify' => false,
+                ]);
+                Logger::info('auto-cleanup: wp-cron getriggered fuer freigegebene Slots');
+            }
         } else {
             Logger::info('auto-cleanup: nothing to clean');
         }
