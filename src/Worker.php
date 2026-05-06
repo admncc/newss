@@ -205,14 +205,14 @@ final class Worker
             // nicht zwischendurch erneut enqueueed
             set_transient(self::pendingTransientKey($videoId), 1, 7 * DAY_IN_SECONDS);
 
-            self::log(sprintf(
+            self::skip(sprintf(
                 'transcript empty (%d chars, Versuch %d/3, Video %.1fh alt) — Retry in %dh geplant. %s',
                 $chars,
                 $attempt,
                 $ageHours,
                 (int) round($delay / HOUR_IN_SECONDS),
                 $diagnose
-            ));
+            ), $videoId);
             return;
         }
 
