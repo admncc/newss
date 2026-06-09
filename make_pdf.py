@@ -14,22 +14,24 @@ WARN_BG = (255, 243, 214)
 ALT_BG = (242, 245, 247)
 LINE = (184, 196, 204)
 
+# (pos, Fassade, Raum, Aufteilung, BRH ab FFB, Position horiz., reine Masse, + Kasten, warn)
 rows = [
-    ("1.1",  "West", "Schlafen 1",                 "2-tlg.: DK + festverglast",            "1835 x 1238", "1835 x 1498", False),
-    ("1.3",  "West", "BAD Hauptfenster",            "2-tlg.: DK + DK",                      "3080 x 700",  "3080 x 960",  False),
-    ("1.5a", "West", "Schlafen 2",                  "2-tlg.: DK + festverglast",            "1835 x 1238", "1835 x 1498", False),
-    ("1.5b", "West", "Schlafen 3",                  "2-tlg.: DK + festverglast",            "1835 x 1238", "1835 x 1498", False),
-    ("2.1",  "Sued", "Schlafen 3",                  "2-tlg.: DK + festverglast",            "3080 x 1238", "3080 x 1498", False),
-    ("2.3",  "Sued", "Lounge mit Sitzbank",         "1-tlg.: komplett festverglast",        "3780 x 1700", "3780 x 1960", True),
-    ("2.5",  "Sued", "Schlafen 5 (1 langes Elem.)", "4-tlg.: DK + fest + fest + DK",        "4000 x 1238", "4000 x 1498", False),
-    ("3.1a", "Ost",  "Schlafen 5 - Balkontuer/HST", "Balkontuer 2-tlg.: DK + festvergl.",   "2600 x 2400", "2600 x 2660", False),
-    ("3.1b", "Ost",  "Schlafen 4 - Balkontuer/HST", "Balkontuer 2-tlg.: DK + festvergl.",   "2600 x 2400", "2600 x 2660", False),
-    ("TN1",  "Nord", "Flur - Balkontuer Flachdach", "Balkontuer 1-tlg.: DK (Aussent. RC2)", "1010 x 2100", "1010 x 2360", False),
+    ("1.1",  "West", "Schlafen 1",            "2-tlg.: DK + festverglast",     "900",       "mittig (beide Waende)",        "1835 x 1238", "1835 x 1498", False),
+    ("1.3",  "West", "BAD Hauptfenster",      "2-tlg.: DK + DK",               "1438",      "mittig (beide Waende)",        "3080 x 700",  "3080 x 960",  False),
+    ("1.5a", "West", "Schlafen 2",            "2-tlg.: DK + festverglast",     "900",       "vert. Achse wie EG (Aufmass)", "1835 x 1238", "1835 x 1498", False),
+    ("1.5b", "West", "Schlafen 3",            "2-tlg.: DK + festverglast",     "900",       "mittig (beide Waende)",        "1835 x 1238", "1835 x 1498", False),
+    ("2.1",  "Sued", "Schlafen 3",            "2-tlg.: DK + festverglast",     "900",       "vert. Achse wie EG (Aufmass)", "3080 x 1238", "3080 x 1498", False),
+    ("2.3",  "Sued", "Lounge mit Sitzbank",   "1-tlg.: komplett festverglast", "550",       "mittig (beide Waende)",        "3780 x 1700", "3780 x 1960", True),
+    ("2.5",  "Sued", "Schlafen 5 (lang)",     "4-tlg.: DK + fest + fest + DK", "900",       "vert. Achse wie EG (Aufmass)", "4000 x 1238", "4000 x 1498", False),
+    ("3.1a", "Ost",  "Schlafen 5 - Balkont.", "Balkont. 2-tlg.: DK + fest",    "bodentief", "vert. Achse wie EG",           "2600 x 2400", "2600 x 2660", False),
+    ("3.1b", "Ost",  "Schlafen 4 - Balkont.", "Balkont. 2-tlg.: DK + fest",    "bodentief", "vert. Achse wie EG",           "2600 x 2400", "2600 x 2660", False),
+    ("TN1",  "Nord", "Flur - Balkont. Flachd.","Balkont. 1-tlg.: DK (Aussent.)","100",       "mittig (beide Waende)",        "1010 x 2100", "1010 x 2360", False),
 ]
 
 # column widths (sum ~= 269mm usable on A4 landscape with 14mm margins)
-cols = [16, 18, 56, 70, 52, 57]
+cols = [12, 16, 36, 48, 18, 43, 48, 48]
 heads = ["Pos.", "Fassade", "Raum / Nutzung", "Aufteilung / Oeffnungsart",
+         "BRH ab\nFFB [mm]", "Position\n(horiz. in Wand)",
          "Reine Masse\nB x H [mm]", "+ Aufsatzkasten 260\nB x H [mm]"]
 
 pdf = FPDF(orientation="L", unit="mm", format="A4")
@@ -64,21 +66,21 @@ for w, h in zip(cols, heads):
 pdf.set_xy(x0, y0 + hh)
 
 # Body
-pdf.set_font("Helvetica", "", 8.5)
-for i, (pos, fas, raum, art, mass, neu, warn) in enumerate(rows):
+pdf.set_font("Helvetica", "", 8)
+for i, (pos, fas, raum, art, brh, posh, mass, neu, warn) in enumerate(rows):
     rh = 7
     x = pdf.get_x(); y = pdf.get_y()
     base_fill = WARN_BG if warn else (ALT_BG if i % 2 else (255, 255, 255))
-    vals = [pos, fas, raum, art, mass, neu]
-    aligns = ["C", "C", "L", "L", "C", "C"]
+    vals = [pos, fas, raum, art, brh, posh, mass, neu]
+    aligns = ["C", "C", "L", "L", "C", "L", "C", "C"]
     for j, (w, v, al) in enumerate(zip(cols, vals, aligns)):
         cx = pdf.get_x(); cy = pdf.get_y()
-        if j == 5:
+        if j == 7:
             pdf.set_fill_color(*GREEN_BG); pdf.set_text_color(*GREEN_TX)
-            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_font("Helvetica", "B", 8)
         else:
             pdf.set_fill_color(*base_fill); pdf.set_text_color(28, 43, 54)
-            pdf.set_font("Helvetica", "B" if j == 0 else "", 8.5)
+            pdf.set_font("Helvetica", "B" if j == 0 else "", 8)
         pad = 1.5 if al == "L" else 0
         pdf.rect(cx, cy, w, rh, style="DF")
         pdf.set_xy(cx + pad, cy)
@@ -99,6 +101,9 @@ notes = [
     "sowie die Anschlaege nach Vorgabe Rick.",
     "Aufsatzkasten: rechte Spalte = reine Hoehe + 260 mm Kastenhoehe (ROMA PURO 2.XR-RS). "
     "Die Breite aendert sich durch den Kasten nicht.",
+    "BRH = Bruestungshoehe ab OK Fertigfussboden (FFB = +280 mm ab Rohbeton). "
+    "'bodentief' = Balkontuer ab Boden (BRH 0). Position = horizontale Lage in der Wand, "
+    "vor Ort durch Aufmass (Megerle/Fensterbauer) bestaetigen.",
     "Pos. 2.3 Lounge (gelb): Mit 260er-Kasten wird der Sturzbereich sehr knapp. "
     "Position geht so an Rick (Megerle) - Feedback abwarten, bevor fixiert wird.",
 ]
