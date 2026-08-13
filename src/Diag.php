@@ -47,6 +47,18 @@ final class Diag
             'callback'            => [self::class, 'routeChannels'],
             'permission_callback' => [self::class, 'checkAuth'],
         ]);
+        register_rest_route(self::NAMESPACE, '/diag/categories', [
+            'methods'             => 'GET',
+            'callback'            => [self::class, 'routeCategories'],
+            'permission_callback' => [self::class, 'checkAuth'],
+        ]);
+    }
+
+    public static function routeCategories(\WP_REST_Request $req): \WP_REST_Response
+    {
+        return new \WP_REST_Response([
+            'ts' => time(),
+        ] + self::categoryDebug());
     }
 
     /**
@@ -75,6 +87,74 @@ final class Diag
             return new \WP_Error('newss_diag_bad_token', 'Invalid token', ['status' => 401]);
         }
         return true;
+    }
+
+    /**
+     * Fuer Debugging: welche Kategorien sind konfiguriert und wie sind
+     * die letzten Newss-Posts kategorisiert.
+     *
+     * @return array{configured:array<int,string>, wp_categories:array<int,array<string,mixed>>, recent_newss_posts:array<int,array<string,mixed>>}
+     */
+    private static function categoryDebug(): array
+    {
+        global $wpdb;
+
+        $configured = Anthropic::categoryList();
+
+        // Alle WP-Kategorien mit Post-Count
+        $wpCats = [];
+        $terms = get_terms(['taxonomy' => 'category', 'hide_empty' => false, 'number' => 100]);
+        if (!is_wp_error($terms)) {
+            foreach ($terms as $t) {
+                $wpCats[] = [
+                    'term_id' => (int) $t->term_id,
+                    'name'    => (string) $t->name,
+                    'slug'    => (string) $t->slug,
+                    'count'   => (int) $t->count,
+                ];
+            }
+        }
+
+        // Letzte 20 Newss-Posts mit Kategorie-Zuweisung
+        $rows = $wpdb->get_results(
+            "SELECT p.ID, p.post_title, p.post_date_gmt, pm.meta_value AS video_id
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
+             WHERE pm.meta_key = '_newss_video_id'
+               AND p.post_type = 'post'
+               AND p.post_status IN ('publish','draft','private','pending','future')
+             ORDER BY p.ID DESC
+             LIMIT 20",
+            ARRAY_A
+        ) ?: [];
+        $recent = [];
+        foreach ($rows as $r) {
+            $postId = (int) $r['ID'];
+            $cats = wp_get_post_categories($postId, ['fields' => 'all']);
+            $catNames = [];
+            $catIds = [];
+            if (!is_wp_error($cats)) {
+                foreach ($cats as $c) {
+                    $catNames[] = (string) $c->name;
+                    $catIds[] = (int) $c->term_id;
+                }
+            }
+            $recent[] = [
+                'post_id'    => $postId,
+                'title'      => (string) $r['post_title'],
+                'video_id'   => (string) $r['video_id'],
+                'created_gmt'=> (string) $r['post_date_gmt'],
+                'category_ids'   => $catIds,
+                'category_names' => $catNames,
+                'uncategorized'  => in_array('Uncategorized', $catNames, true) || in_array('Ohne Kategorie', $catNames, true) || $cats === [],
+            ];
+        }
+
+        return [
+            'configured'         => $configured,
+            'wp_categories'      => $wpCats,
+            'recent_newss_posts' => $recent,
+        ];
     }
 
     public static function routeStatus(\WP_REST_Request $req): \WP_REST_Response
