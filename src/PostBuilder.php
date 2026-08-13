@@ -150,34 +150,86 @@ final class PostBuilder
 
     private function resolveCategories(int $perChannelFallback, string $aiCategoryName): array
     {
+        $aiCategoryName = trim($aiCategoryName);
         if ($aiCategoryName !== '') {
             $allowed = Anthropic::categoryList();
-            if (in_array($aiCategoryName, $allowed, true)) {
-                $termId = $this->ensureCategoryByName($aiCategoryName);
+            // Case-insensitive + whitespace-tolerant Vergleich damit
+            // 'wirtschaft & finanzen' oder ' Wirtschaft & Finanzen ' auch matcht
+            $normalized = self::normalizeName($aiCategoryName);
+            $match = '';
+            foreach ($allowed as $cand) {
+                if (self::normalizeName($cand) === $normalized) {
+                    $match = $cand;
+                    break;
+                }
+            }
+            if ($match !== '') {
+                $termId = $this->ensureCategoryByName($match);
+                Logger::info('category: ai=' . $aiCategoryName . ' -> matched=' . $match . ' -> term_id=' . $termId);
                 if ($termId > 0) {
                     return [$termId];
                 }
+            } else {
+                Logger::warn('category: ai=' . $aiCategoryName . ' NICHT in allowed-list (' . count($allowed) . ' options) -> Fallback');
             }
+        } else {
+            Logger::warn('category: Claude hat keine Kategorie gesetzt -> Fallback');
         }
 
         if ($perChannelFallback > 0) {
+            Logger::info('category: fallback per-channel term_id=' . $perChannelFallback);
             return [$perChannelFallback];
         }
 
         $defaultCat = (int) get_option('newss_default_category', 0);
-        return $defaultCat > 0 ? [$defaultCat] : [];
+        if ($defaultCat > 0) {
+            Logger::info('category: fallback default term_id=' . $defaultCat);
+            return [$defaultCat];
+        }
+        Logger::warn('category: keine Kategorie zuordbar -> Uncategorized (WP-default)');
+        return [];
+    }
+
+    private static function normalizeName(string $s): string
+    {
+        // Case-insensitive, collapsed whitespace, decode HTML-entities (falls Claude &amp; zurueckgibt)
+        $s = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $s = preg_replace('/\s+/', ' ', $s) ?? $s;
+        return mb_strtolower(trim($s), 'UTF-8');
     }
 
     private function ensureCategoryByName(string $name): int
     {
+        // 1) exact-name lookup
         $term = get_term_by('name', $name, 'category');
         if ($term && !is_wp_error($term)) {
             return (int) $term->term_id;
         }
+        // 2) slug-basierter Lookup (falls WP-Term unterschiedlich escaped ist)
+        $slug = sanitize_title($name);
+        $term = get_term_by('slug', $slug, 'category');
+        if ($term && !is_wp_error($term)) {
+            Logger::info('category: name-lookup fail, aber slug=' . $slug . ' gefunden -> term_id=' . $term->term_id);
+            return (int) $term->term_id;
+        }
+        // 3) Neu anlegen
         $created = wp_insert_term($name, 'category');
         if (is_wp_error($created)) {
+            $err = $created->get_error_code();
+            $msg = $created->get_error_message();
+            // term_exists: WP hat den Slug schon (evtl. mit anderem Namen). Term-ID rausholen.
+            if ($err === 'term_exists') {
+                $data = $created->get_error_data();
+                $existingId = is_array($data) ? (int) ($data['term_id'] ?? 0) : (int) $data;
+                if ($existingId > 0) {
+                    Logger::info('category: wp_insert_term=term_exists -> reuse term_id=' . $existingId);
+                    return $existingId;
+                }
+            }
+            Logger::error('category: wp_insert_term FAIL fuer "' . $name . '": ' . $err . ' -- ' . $msg);
             return 0;
         }
+        Logger::info('category: neu angelegt "' . $name . '" -> term_id=' . $created['term_id']);
         return (int) $created['term_id'];
     }
 
