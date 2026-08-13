@@ -133,7 +133,7 @@ final class Worker
             $transcript = $tx->fetch($videoId);
             if ($transcript === '' || mb_strlen($transcript) < 50) {
                 $diag = self::formatAttemptLog($tx->attemptLog);
-                self::handleEmptyTranscript($payload, $videoId, mb_strlen($transcript), $diag);
+                self::handleEmptyTranscript($payload, $videoId, mb_strlen($transcript), $diag, $tx->attemptLog);
                 return;
             }
             self::log(sprintf('transcript via %s (%d chars)', $tx->lastProvider ?: 'unknown', mb_strlen($transcript)));
@@ -194,11 +194,24 @@ final class Worker
      * (Video < 24h alt UND Versuch < 3) und ggf. neue AS-Action in
      * 2h bzw. 4h schedulen. Sonst permanent skippen.
      */
-    private static function handleEmptyTranscript(array $payload, string $videoId, int $chars, string $diagnose): void
+    private static function handleEmptyTranscript(array $payload, string $videoId, int $chars, string $diagnose, array $attemptLog = []): void
     {
         $attempt     = max(1, (int) ($payload['attempt'] ?? 1));
         $publishedTs = self::parsePublishedTs((string) ($payload['published'] ?? ''));
         $ageHours    = $publishedTs > 0 ? (time() - $publishedTs) / 3600 : 999;
+
+        // Permanent-Fail-Detection: bei bestimmten Ursachen (Live-Stream,
+        // Age-Restriction, private/geoblocked, Audio zu lang) helfen Retries
+        // nachweislich nicht -> sofort skip statt +2h/+4h zu verplempern.
+        $permanent = Transcript::classifyPermanentFail($attemptLog);
+        if ($permanent !== null) {
+            self::skip(sprintf(
+                'transcript empty (permanent-fail: %s). %s',
+                $permanent,
+                $diagnose
+            ), $videoId);
+            return;
+        }
 
         $shouldRetry = $attempt < 3 && $ageHours < 24 && function_exists('as_schedule_single_action');
         if ($shouldRetry) {

@@ -32,6 +32,42 @@ final class Transcript
         $this->attemptLog[] = ['provider' => $provider, 'ok' => $ok, 'detail' => $detail];
     }
 
+    /**
+     * Prueft den attemptLog auf Fail-Muster, bei denen Retries garantiert nicht
+     * helfen — dann sofort skip statt +2h/+4h zu warten. Liefert einen kurzen
+     * Reason-String oder null wenn Retry-lohnend.
+     *
+     * @param array<int,array{provider:string,ok:bool,detail:string}> $attemptLog
+     */
+    public static function classifyPermanentFail(array $attemptLog): ?string
+    {
+        foreach ($attemptLog as $a) {
+            $detail = mb_strtolower((string) ($a['detail'] ?? ''));
+            // Live-Stream in Zukunft — hat keine Captions bis er beginnt und danach
+            // wird der Content erst nach Ende verarbeitet -> Retry sinnlos in 2h.
+            // Am naechsten Channel-Poll wird das Video ggf. neu enqueueed nachdem
+            // der Stream fertig ist.
+            if (str_contains($detail, 'this live event') || str_contains($detail, 'premieres in') || str_contains($detail, 'live stream will begin')) {
+                return 'live-stream not yet available';
+            }
+            // Age-Restriction: yt-dlp mit unseren Cookies kommt nicht durch weil
+            // die Cookies nicht age-verifiziert sind. Retry hilft nicht.
+            if (str_contains($detail, 'sign in to confirm your age') || str_contains($detail, 'confirm your age')) {
+                return 'age-restricted video (cookies not age-verified)';
+            }
+            // Private / members-only / geblockte Videos
+            if (str_contains($detail, 'private video') || str_contains($detail, 'members-only')
+                || str_contains($detail, 'video unavailable') || str_contains($detail, 'geo-restricted')) {
+                return 'video permanently unavailable';
+            }
+            // Whisper-Audio > 24 MB: yt-dlp braucht das ganze Audio, Retry hilft nicht
+            if (str_contains($detail, '> 24 mb (whisper-limit)')) {
+                return 'video too long for whisper (audio >24 MB after compression)';
+            }
+        }
+        return null;
+    }
+
     public function fetch(string $videoId): string
     {
         $this->lastProvider = '';
