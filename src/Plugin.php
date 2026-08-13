@@ -31,6 +31,7 @@ final class Plugin
 
         Cron::register();
         Worker::register();
+        Diag::register();
     }
 
     public static function maybeRunMigrations(): void

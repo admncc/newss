@@ -38,6 +38,7 @@ final class Settings
         add_action('admin_post_newss_log_clear', [self::class, 'handleLogClear']);
         add_action('admin_post_newss_log_toggle', [self::class, 'handleLogToggle']);
         add_action('wp_ajax_newss_log_feed', [self::class, 'handleAjaxLogFeed']);
+        add_action('admin_post_newss_diag_toggle', [self::class, 'handleDiagToggle']);
 
         // Wenn Verbose-Logging an: jeden admin_post_newss_* Klick + jeden
         // wp_ajax_newss_* Request automatisch loggen (vor dem Handler)
@@ -81,6 +82,25 @@ final class Settings
         check_admin_referer('newss_log_clear');
         Logger::clear();
         Logger::warn('log cleared by ' . (wp_get_current_user()->user_login ?? '?'));
+        wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_LOG));
+        exit;
+    }
+
+    public static function handleDiagToggle(): void
+    {
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        check_admin_referer('newss_diag_toggle');
+        $on = !empty($_POST['enable']) ? 1 : 0;
+        update_option(Diag::OPTION_ENABLED, $on, false);
+        if ($on) {
+            // Bei jedem Enable: neuer Token, alter wird ueberschrieben
+            $token = Diag::generateToken();
+            set_transient('newss_diag_token_flash', $token, 300); // 5 Min: einmalige Anzeige
+            Logger::warn('diagnostic-api ENABLED by ' . (wp_get_current_user()->user_login ?? '?') . ' (new token generated)');
+        } else {
+            Diag::revokeToken();
+            Logger::warn('diagnostic-api disabled by ' . (wp_get_current_user()->user_login ?? '?') . ' (token revoked)');
+        }
         wp_safe_redirect(admin_url('admin.php?page=' . self::SLUG_LOG));
         exit;
     }
@@ -1681,6 +1701,58 @@ final class Settings
                     <button type="submit" class="button">Log leeren</button>
                 </form>
                 <button type="button" class="button" id="newss-log-copy">Log kopieren</button>
+            </div>
+
+            <?php
+            $diagEnabled = (int) get_option(Diag::OPTION_ENABLED, 0) === 1;
+            $diagTokenFlash = get_transient('newss_diag_token_flash');
+            if ($diagTokenFlash) delete_transient('newss_diag_token_flash');
+            $diagBase = rest_url(Diag::NAMESPACE . '/diag');
+            ?>
+            <div style="margin:16px 0;padding:12px 16px;background:<?php echo $diagEnabled ? '#e6f0ff' : '#f6f7f7'; ?>;border:1px solid #dcdcde;border-left:4px solid <?php echo $diagEnabled ? '#2271b1' : '#999'; ?>;max-width:880px">
+                <h3 style="margin:0 0 8px 0;font-size:14px">Diagnostic-API <span style="font-weight:normal;color:#666">— Read-only REST-Endpoints für externe Diagnose</span></h3>
+                <p style="margin:0 0 8px 0;font-size:12px;color:#555">
+                    Wenn aktiv: 4 Endpoints geben Status, Logs, Pipeline und Channel-Konfiguration als JSON zurück. Auth via Bearer-Token im <code>Authorization</code>-Header (oder <code>?token=</code>-Query-Param falls Reverse-Proxy den Header droppt).<br>
+                    <strong>Bei jedem Einschalten wird ein neuer Token generiert</strong> — der alte wird ungültig.
+                </p>
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+                    <strong>Status:</strong>
+                    <span style="color:<?php echo $diagEnabled ? '#0040b0' : '#666'; ?>;font-weight:600">
+                        <?php echo $diagEnabled ? '● AN' : '○ AUS'; ?>
+                    </span>
+                    <form method="post" action="<?php echo esc_url($toggleUrl); ?>" style="margin:0">
+                        <input type="hidden" name="action" value="newss_diag_toggle">
+                        <input type="hidden" name="enable" value="<?php echo $diagEnabled ? '0' : '1'; ?>">
+                        <?php wp_nonce_field('newss_diag_toggle'); ?>
+                        <button type="submit" class="button">
+                            <?php echo $diagEnabled ? 'API deaktivieren (Token widerrufen)' : 'API aktivieren (neuen Token generieren)'; ?>
+                        </button>
+                    </form>
+                </div>
+                <?php if ($diagTokenFlash): ?>
+                    <div style="margin:8px 0;padding:10px 12px;background:#fff8e1;border:1px solid #ffb900;border-radius:3px">
+                        <p style="margin:0 0 6px 0;font-weight:600">⚠ Neuer Token — jetzt kopieren, wird danach nicht mehr angezeigt:</p>
+                        <div style="display:flex;gap:6px;align-items:center">
+                            <input type="text" readonly value="<?php echo esc_attr($diagTokenFlash); ?>" style="flex:1;font-family:monospace;font-size:12px;padding:6px;background:#fff;border:1px solid #dcdcde" onclick="this.select()">
+                            <button type="button" class="button" onclick="var i=this.previousElementSibling;i.select();document.execCommand('copy');this.textContent='✓ kopiert';setTimeout(function(){this.textContent='Kopieren';}.bind(this),2000);">Kopieren</button>
+                        </div>
+                    </div>
+                <?php elseif ($diagEnabled): ?>
+                    <p style="margin:0;font-size:11px;color:#666">Token bereits gesetzt (nicht anzeigbar). Neu-Aktivierung generiert einen neuen.</p>
+                <?php endif; ?>
+                <?php if ($diagEnabled): ?>
+                    <p style="margin:8px 0 4px 0;font-weight:600;font-size:12px">Endpoints:</p>
+                    <ul style="margin:0;padding:0 0 0 16px;font-family:monospace;font-size:11px;line-height:1.6">
+                        <li><code>GET <?php echo esc_html($diagBase); ?>/status</code> — KPIs, Health, Config-Summary, Cron-Info</li>
+                        <li><code>GET <?php echo esc_html($diagBase); ?>/log?limit=200&amp;level=&amp;since=</code> — Log-Buffer paginiert</li>
+                        <li><code>GET <?php echo esc_html($diagBase); ?>/pipeline</code> — Running/Pending/Failed-Live-Daten</li>
+                        <li><code>GET <?php echo esc_html($diagBase); ?>/channels</code> — Channels-Config</li>
+                    </ul>
+                    <p style="margin:8px 0 0 0;font-size:11px;color:#666">
+                        Test via <code>curl</code>:<br>
+                        <code style="user-select:all">curl -H "Authorization: Bearer &lt;TOKEN&gt;" <?php echo esc_html($diagBase); ?>/status | jq</code>
+                    </p>
+                <?php endif; ?>
             </div>
 
             <p style="margin:0 0 6px 0;color:#666;font-size:12px">
