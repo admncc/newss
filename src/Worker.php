@@ -129,6 +129,27 @@ final class Worker
                 }
             }
 
+            // Duplicate-Detection: verschiedene Channels berichten oft ueber
+            // dieselben Ereignisse. Wir prueft ob es in den letzten 24h schon
+            // einen Newss-Post mit sehr aehnlichem Titel gibt -> skip damit
+            // wir nicht 3x dieselbe News in verschiedenen Wordings publishen.
+            // Vor dem Transcript-Fetch -> spart Whisper+Rewrite-Cost.
+            if ((int) get_option('newss_dedup_enabled', 1) === 1) {
+                $videoTitle = (string) ($payload['video_title'] ?? '');
+                $windowH    = max(1, (int) get_option('newss_dedup_window_hours', 24));
+                $threshold  = max(30, min(95, (int) get_option('newss_dedup_threshold', 65)));
+                $dup = self::findRecentDuplicate($videoTitle, $windowH * HOUR_IN_SECONDS, $threshold);
+                if ($dup !== null) {
+                    self::skip(sprintf(
+                        'duplicate topic (%d%% aehnlich zu Post #%d "%s")',
+                        (int) $dup['similarity'],
+                        (int) $dup['post_id'],
+                        mb_substr((string) $dup['title'], 0, 80)
+                    ), $videoId);
+                    return;
+                }
+            }
+
             $tx = new Transcript();
             $transcript = $tx->fetch($videoId);
             if ($transcript === '' || mb_strlen($transcript) < 50) {
@@ -187,6 +208,72 @@ final class Worker
     public static function pendingTransientKey(string $videoId): string
     {
         return 'newss_pending_' . $videoId;
+    }
+
+    /**
+     * Sucht Newss-Posts der letzten $windowSec mit sehr aehnlichem Titel.
+     * Liefert die aehnlichste Zeile oder null wenn nichts drueber threshold.
+     *
+     * Similarity: PHP similar_text (Levenshtein-based, gibt Prozent).
+     * Normalisierung vorher: lowercase, Punctuation weg, WP-typische Praefixe
+     * ('EIL:', '🔴', 'LIVE:', etc.) strippen -- News-Kanaele haengen die oft
+     * ans gleiche Ereignis dran.
+     *
+     * @return ?array{post_id:int, title:string, similarity:float}
+     */
+    private static function findRecentDuplicate(string $newTitle, int $windowSec, int $thresholdPercent): ?array
+    {
+        $newNorm = self::normalizeTitle($newTitle);
+        if (mb_strlen($newNorm) < 15) {
+            // Zu kurz fuer sinnvollen Vergleich (Shorts etc.)
+            return null;
+        }
+
+        global $wpdb;
+        $since = gmdate('Y-m-d H:i:s', time() - $windowSec);
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT p.ID, p.post_title
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
+             WHERE pm.meta_key = %s
+               AND p.post_type = 'post'
+               AND p.post_status IN ('publish','draft','private','pending','future')
+               AND p.post_date_gmt >= %s
+             ORDER BY p.ID DESC
+             LIMIT 100",
+            '_newss_video_id',
+            $since
+        ), ARRAY_A) ?: [];
+
+        $best = null;
+        foreach ($rows as $r) {
+            $existNorm = self::normalizeTitle((string) $r['post_title']);
+            if (mb_strlen($existNorm) < 10) continue;
+            similar_text($newNorm, $existNorm, $percent);
+            if ($percent >= $thresholdPercent && ($best === null || $percent > $best['similarity'])) {
+                $best = [
+                    'post_id'    => (int) $r['ID'],
+                    'title'      => (string) $r['post_title'],
+                    'similarity' => (float) $percent,
+                ];
+            }
+        }
+        return $best;
+    }
+
+    private static function normalizeTitle(string $s): string
+    {
+        // News-Kanal-Praefixe/Sensationsworte strippen die den Similarity-Vergleich
+        // verzerren wuerden ('EIL:', 'LIVE:', 'SCHOCK IN...', '🔴')
+        $s = preg_replace('/\p{So}|\p{Cn}/u', '', $s) ?? $s; // Emojis + Symbole
+        $s = preg_replace('/\b(EIL|LIVE|SCHOCK|EXKLUSIV|BREAKING|SKANDAL|IRRE|HAMMER|BILD LIVE|WELT NEWS)\s*[:|-]?/iu', '', $s) ?? $s;
+        // Kanal-Namen die oft im Titel stehen
+        $s = preg_replace('/\|\s*(tagesschau|tagesthemen|heute journal|Aktionaer|BILD|WELT|ntv|Focus).*$/iu', '', $s) ?? $s;
+        // Interpunktion + Ziffern grob wegwerfen, Umlaute klein
+        $s = mb_strtolower($s, 'UTF-8');
+        $s = preg_replace('/[^\p{L}\s]/u', ' ', $s) ?? $s;
+        $s = preg_replace('/\s+/', ' ', $s) ?? $s;
+        return trim($s);
     }
 
     /**

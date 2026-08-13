@@ -869,6 +869,9 @@ final class Settings
             'newss_default_status'      => [self::class, 'sanitizeStatus'],
             'newss_kill_switch_drafts'  => 'absint',
             'newss_post_author'         => 'absint',
+            'newss_dedup_enabled'         => 'absint',
+            'newss_dedup_window_hours'    => 'absint',
+            'newss_dedup_threshold'       => 'absint',
         ];
         foreach ($publishingOpts as $opt => $cb) {
             register_setting(self::GROUP_PUBLISHING, $opt, ['sanitize_callback' => $cb]);
@@ -1493,6 +1496,9 @@ final class Settings
         $blockedTopics = (array)  get_option('newss_blocked_topics', []);
         $blockedAction    = (string) get_option('newss_blocked_action', 'skip');
         $preclassifyOn    = (int) get_option('newss_preclassify_enabled', 1);
+        $dedupOn          = (int) get_option('newss_dedup_enabled', 1);
+        $dedupWindow      = (int) get_option('newss_dedup_window_hours', 24);
+        $dedupThreshold   = (int) get_option('newss_dedup_threshold', 65);
         $killSwitch    = (int)    get_option('newss_kill_switch_drafts', 0);
         $postAuthor    = (int)    get_option('newss_post_author', 0);
         ?>
@@ -1575,6 +1581,27 @@ final class Settings
                                 &nbsp;&nbsp;<strong>2.</strong> Claude Haiku auf Titel + Channel (~0,001 USD/Video, nur falls Stufe 1 nichts findet)<br>
                                 &nbsp;&nbsp;<strong>3.</strong> Reguläre Topic-Tags-Prüfung nach dem Claude-Rewrite (Final-Check, läuft immer)<br>
                                 Wirkt nur bei <strong>Aktion = Überspringen</strong>; bei „Als Entwurf anlegen" muss die volle Pipeline laufen.
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Duplicate-Detection</th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="newss_dedup_enabled" value="1" <?php checked($dedupOn, 1); ?>>
+                                Vor Transcript-Fetch prüfen ob es in den letzten X Std. schon einen Newss-Post mit sehr ähnlichem Titel gibt — bei Treffer skip statt Doppel-Publish.
+                            </label>
+                            <p class="description">
+                                Verschiedene Kanäle berichten oft über dasselbe Event (z. B. Merz-Rede bei ntv+WELT+BILD).
+                                Similarity via PHP <code>similar_text</code> nach Titel-Normalisierung (Emojis, „EIL:", Channel-Namen strippen).<br>
+                                <label>Fenster:
+                                    <input type="number" name="newss_dedup_window_hours" value="<?php echo esc_attr((string) $dedupWindow); ?>" min="1" max="168" step="1" style="width:70px"> Std.
+                                </label>
+                                &nbsp;&nbsp;
+                                <label>Threshold:
+                                    <input type="number" name="newss_dedup_threshold" value="<?php echo esc_attr((string) $dedupThreshold); ?>" min="30" max="95" step="5" style="width:70px">%
+                                </label>
+                                (65% = moderat, 75% = strenger, 55% = aggressiv)
                             </p>
                         </td>
                     </tr>

@@ -40,6 +40,9 @@ $options = [
     'newss_log_enabled',
     'newss_diag_enabled',
     'newss_diag_token',
+    'newss_dedup_enabled',
+    'newss_dedup_window_hours',
+    'newss_dedup_threshold',
     'newss_db_version',
 ];
 foreach ($options as $opt) {
